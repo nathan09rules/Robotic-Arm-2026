@@ -1,0 +1,4 @@
+import bpy
+
+bpy.ops.wm.open_mainfile(filepath="/home/nathanpd/Documents/26/Robotic-Arm/3D HAND/source/RiggedLowpolyHand.blend")
+bpy.ops.export_scene.gltf(filepath="/home/nathanpd/Documents/26/Robotic-Arm/3D HAND/source/hand.glb")
