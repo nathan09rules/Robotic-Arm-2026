@@ -79,46 +79,33 @@ def move_to_target(target_xyz):
     init_pos = list(current_angles)
     init_pos[1] = desired_yaw
 
-    target_angles = arm_chain.inverse_kinematics([target_x, target_y, target_z], initial_position=init_pos)
+    target_angles = ikpy.chain.Chain.inverse_kinematics(arm_chain, [target_x, target_y, target_z], initial_position=init_pos)
 
-    steps = 30
-    result_list = []
+    deg1 = 90 + math.degrees(target_angles[1])
+    deg2 = math.degrees(target_angles[3])
 
-    for step in range(steps + 1):
-        alpha = step / steps
-        interpolated = [c + (t - c) * alpha for c, t in zip(current_angles, target_angles)]
-        curr_pos = arm_chain.forward_kinematics(interpolated)[:3, 3]
+    channel_states[14] = deg1
+    channel_states[15] = deg2
 
-        ax.cla()
-        ax.set_xlim(-0.2, 0.2)
-        ax.set_ylim(-0.2, 0.2)
-        ax.set_zlim(0, 0.25)
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        arm_chain.plot(interpolated, ax)
-        ax.scatter([target_x], [target_y], [target_z], c='r', s=100)
-        ax.scatter([curr_pos[0]], [curr_pos[1]], [curr_pos[2]], c='b', s=100)
-        ax.plot([target_x, target_x], [target_y, target_y], [0, target_z], 'r--', alpha=0.5)
-        ax.plot([curr_pos[0], curr_pos[0]], [curr_pos[1], curr_pos[1]], [0, curr_pos[2]], 'b--', alpha=0.5)
-        plt.draw()
-        plt.pause(0.02)
+    ax.cla()
+    ax.set_xlim(-0.2, 0.2)
+    ax.set_ylim(-0.2, 0.2)
+    ax.set_zlim(0, 0.25)
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    arm_chain.plot(target_angles, ax)
+    curr_pos = arm_chain.forward_kinematics(target_angles)[:3, 3]
+    ax.scatter([target_x], [target_y], [target_z], c='r', s=100)
+    ax.scatter([curr_pos[0]], [curr_pos[1]], [curr_pos[2]], c='b', s=100)
+    plt.draw()
+    plt.pause(0.02)
 
-        deg1 = 90 + math.degrees(interpolated[1])
-        deg2 = math.degrees(interpolated[3])
-        
-        channel_states[14] = deg1
-        channel_states[15] = deg2
+    send_cmd(f"14:{deg1:.2f}")
+    #send_cmd(f"15:{deg2:.2f}")
 
-        result_list.append((14, deg1))
-        result_list.append((15, deg2))
-
-        send_cmd(f"14:{deg1:.2f}")
-        send_cmd(f"15:{deg2:.2f}")
-
-    result_list.append(("IK", (target_x, target_y, target_z)))
     current_angles = target_angles
-    return result_list
+    return [(14, deg1), (15, deg2), ("IK", (target_x, target_y, target_z))]
 
 def run_procedure(steps):
     history = []

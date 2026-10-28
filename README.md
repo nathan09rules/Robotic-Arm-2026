@@ -15,3 +15,7 @@ Uses blender intented to visualise the current state the porgram thinks the arm 
 
 # REMEMBER
 - the current esp32 does not accept -1 as an input change that
+- sudo chmod 666 /dev/ttyUSB0
+
+
+

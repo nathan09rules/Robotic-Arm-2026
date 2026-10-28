@@ -31,7 +31,7 @@ arm_chain = ikpy.chain.Chain(name='arm', links=[
         origin_translation=[0, 0, 0],
         origin_orientation=[0, 0, 0],
         rotation=[0, 0, 1],
-        bounds=(-math.pi, math.pi)
+        bounds=(-math.pi/2, math.pi/2)
     ),
     URDFLink(
         name="base_pitch",
@@ -141,8 +141,8 @@ try:
                         plt.pause(0.02)
                         
                         send_cmd(f"14:{90 + math.degrees(interpolated[1]):.2f}")
-                        #send_cmd(f"13:{90 + math.degrees(interpolated[2]):.2f}")
-                        send_cmd(f"15:{math.degrees(interpolated[3]):.2f}")
+                        #send_cmd(f"13:{math.degrees(interpolated[2]):.2f}")
+                        send_cmd(f"15:{90 + math.degrees(interpolated[3]):.2f}")
                         print(math.degrees(interpolated[2]))
                     current_angles = target_angles
 
