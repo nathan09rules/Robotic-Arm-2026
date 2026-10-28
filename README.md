@@ -10,3 +10,8 @@ Uses Inverese kinematic library form ikpy to make the required roations required
 
 ## 3) 3D arm library 
 Uses blender intented to visualise the current state the porgram thinks the arm is in
+
+
+
+# REMEMBER
+- the current esp32 does not accept -1 as an input change that

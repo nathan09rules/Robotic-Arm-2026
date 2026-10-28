@@ -6,24 +6,17 @@ PORT = 8888
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 Procedures = {
-    "claw":[
-        [0,60],
-        [-1, 3],
-        [0,100],
+    "claw": [
+        [0, 40],
+        [-1, 1],
+        [0, 100],
     ],
-    "mv":[
-    [4,120],
-    [0,60],
-    [-1,2],
-    [4,70],
-    [0,100]
-        ]
-    }
-
+}
 
 def send_cmd(payload: str):
-    if payload in Procedures:
-        current = Procedures[payload]
+    payload = payload.strip()
+    if payload.lower() == "claw":
+        current = Procedures["claw"]
         for i in current:
             print(i)
             if i[0] == -1:

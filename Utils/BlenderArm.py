@@ -1,4 +1,5 @@
 import asyncio
+from Utils.Arm import run_procedure
 
 Position =  {
 "THUMB":{
@@ -71,9 +72,7 @@ STATE = {
     "PINKY": 0,
 }
 
-Conditions = [
-    ["claw", ["THUMB", 0], ["INDEX", 2], ["MIDDLE", 2], ["RING", 0], ["PINKY", 0]]
-    ]
+
 
 async def send_pose(bone_name, x, y, z):
     reader, writer = await asyncio.open_connection('127.0.0.1', 9999)
@@ -100,9 +99,10 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 Procedures = {
     "claw":[
-        [0,60],
-        [-1, 3],
-        [0,100],
+    [0,60],
+    [-1, 3],
+    [0,100],
+    []
     ],
     "mv":[
     [4,120],
@@ -110,34 +110,18 @@ Procedures = {
     [-1,2],
     [4,70],
     [0,100]
-        ]
+    ],
+
+    "NOT": [
+    [4,120],
+    [0,60],
+    [-1,2],
+    [4,70],
+    ["IK", 0.3, 0.4, 0.1],
+    [0,100]   
+   ]
     }
 last_done = ""
-
-def send_cmd(payload: str):
-    print(payload)
-    global last_done
-    if payload in Procedures and payload != last_done:
-        current = Procedures[payload]
-        last_done = payload
-        for i in current:
-            print(i)
-            if i[0] == -1:
-                time.sleep(i[1])
-            else:
-                send_cmd(f"{i[0]}:{i[1]}")
-    else:
-        sock.sendto(payload.encode('utf-8'), (ESP32_IP, PORT))
-
-def process_msg(usr_msg: str):
-    msg = usr_msg.strip()
-    if not msg:
-        return
-    if msg.upper() == "OFF":
-        send_cmd("OFF")
-        return
-    send_cmd(msg)
-
 
 def finger(finger_name, state):
     if finger_name in STATE and STATE[finger_name] != state:
@@ -145,15 +129,19 @@ def finger(finger_name, state):
         Tranform = Position[finger_name][state]
         #for bone in Tranform:
         #    await send_pose(str(bone[0]), bone[1][0], bone[1][1], bone[1][2])
-        for state in Conditions:
-            passed = True
-            for bone_num in state[1::]:
-                if STATE[bone_num[0]] != bone_num[1]:
-                    passed = False
 
-            if passed == True:
-                process_msg(state[0])
+Conditions = [
+    ["claw", ["THUMB", 0], ["INDEX", 2], ["MIDDLE", 2], ["RING", 0], ["PINKY", 0]]
+]
 
+def HandState():
+     for state in Conditions:
+        passed = True
+        for bone_num in state[1::]:
+            if STATE[bone_num[0]] != bone_num[1]:
+                passed = False
 
+        if passed == True and state[0] != last_done:
+            print(run_procedure(state[0]))   
 
         

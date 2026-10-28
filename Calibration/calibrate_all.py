@@ -14,7 +14,7 @@ CAM2_SOURCE = 4
 
 OUTPUT_FILE = "Utils/webcam-calibration.npz"
 
-NUM_VIEWS = 20
+NUM_VIEWS = 10
 CAPTURE_INTERVAL = 2.0
 MIN_CORNERS = 6
 

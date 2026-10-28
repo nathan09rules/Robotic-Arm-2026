@@ -54,7 +54,7 @@ try:
             if event.type == pygame.QUIT:
                 running = False
             if event.type == pygame.JOYBUTTONDOWN:
-                if event.button == 5:
+                if event.button == 10:
                     bearing_rad = math.atan2(x, y)
                     bearing_deg = (math.degrees(bearing_rad) + 360) % 360
                     print(f"X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f} | North Bearing: {bearing_deg:.2f}°")
