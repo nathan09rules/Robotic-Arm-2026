@@ -1,7 +1,7 @@
 import socket
-import time
-import math
+import asyncio
 import matplotlib.pyplot as plt
+import math
 import numpy as np
 import ikpy.chain
 from ikpy.link import OriginLink, URDFLink
@@ -58,35 +58,42 @@ ax.set_ylabel('Y')
 ax.set_zlabel('Z')
 
 send_cmd("ARM")
-time.sleep(1.5)
+
+async def init_delay():
+    await asyncio.sleep(1.5)
 
 def get_current_position():
     return arm_chain.forward_kinematics(current_angles)[:3, 3]
 
-def set_channel(channel, rotation):
+async def set_channel(channel, rotation):
     channel_states[channel] = rotation
-    send_cmd(f"{channel}:{rotation:.2f}")
+    await asyncio.to_thread(send_cmd, f"{channel}:{rotation:.2f}")
     return [(channel, rotation)]
 
-def move_to_target(target_xyz):
+async def update_plot_async(target_angles, target_xyz):
+    target_x, target_y, target_z = target_xyz
+    def redraw():
+        ax.cla()
+        ax.set_xlim(-0.2, 0.2)
+        ax.set_ylim(-0.2, 0.2)
+        ax.set_zlim(0, 0.25)
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        arm_chain.plot(target_angles, ax)
+        curr_pos = arm_chain.forward_kinematics(target_angles)[:3, 3]
+        ax.scatter([target_x], [target_y], [target_z], c='r', s=100)
+        ax.scatter([curr_pos[0]], [curr_pos[1]], [curr_pos[2]], c='b', s=100)
+        plt.draw()
+        plt.pause(0.001)
+
+    await asyncio.to_thread(redraw)
+    await asyncio.sleep(0.02)
+
+async def move_to_target(target_xyz):
+    pass
     global current_angles
     target_x, target_y, target_z = target_xyz
-
-    ax.cla()
-    ax.set_xlim(-0.2, 0.2)
-    ax.set_ylim(-0.2, 0.2)
-    ax.set_zlim(0, 0.25)
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    
-    ax.view_init(elev=90, azim=0)
-    arm_chain.plot(current_angles, ax)
-    ax.scatter([target_x], [target_y], [target_z], c='r', s=100)
-    curr_pos = arm_chain.forward_kinematics(current_angles)[:3, 3]
-    ax.scatter([curr_pos[0]], [curr_pos[1]], [curr_pos[2]], c='b', s=100)
-    plt.draw()
-    plt.pause(0.02)
 
     if target_z < 0.05:
         return []
@@ -95,11 +102,12 @@ def move_to_target(target_xyz):
     init_pos = list(current_angles)
     init_pos[1] = desired_yaw
 
-    try:
-        target_angles = ikpy.chain.Chain.inverse_kinematics(arm_chain, [target_x, target_y, target_z], initial_position=init_pos)
-    except ValueError as e:
-        print(f"IK Error (out of bounds/unreachable): {e}")
-        return []
+    target_angles = await asyncio.to_thread(
+        ikpy.chain.Chain.inverse_kinematics,
+        arm_chain,
+        [target_x, target_y, target_z],
+        initial_position=init_pos
+    )
 
     deg1 = 90 + math.degrees(target_angles[1])
     deg2 = math.degrees(target_angles[3])
@@ -107,19 +115,19 @@ def move_to_target(target_xyz):
     channel_states[14] = deg1
     channel_states[15] = deg2
 
-    send_cmd(f"14:{deg1:.2f}")
+    await update_plot_async(target_angles, target_xyz)
+    await asyncio.to_thread(send_cmd, f"14:{deg1:.2f}")
 
     current_angles = target_angles
     return [(14, deg1), (15, deg2), ("IK", (target_x, target_y, target_z))]
 
-def run_procedure(steps):
+async def run_procedure(steps):
     history = []
     for step in steps:
         if step[0] == "IK":
-            history.extend(move_to_target((step[1], step[2], step[3])))
+            res = await move_to_target((step[1], step[2], step[3]))
+            history.extend(res)
         else:
-            history.extend(set_channel(step[0], step[1]))
+            res = await set_channel(step[0], step[1])
+            history.extend(res)
     return history
-
-def update_target(coords):
-    return move_to_target(coords)

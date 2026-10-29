@@ -7,10 +7,6 @@ import numpy as np
 import mediapipe as mp
 import matplotlib.pyplot as plt
 
-
-CALIBRATION_FILE = "Utils/webcam-calibration.npz"
-MODEL_PATH = "Utils/hand_landmarker.task"
-
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -20,19 +16,24 @@ HAND_CONNECTIONS = [
 ]
 
 
+
+
+CALIBRATION_FILE = "Utils/webcam-calibration.npz"
+FLOOR_FILE = "Utils/floor-calibration.npz"
+MODEL_PATH = "Utils/hand_landmarker.task"
+
+
 def load_calibration(filename):
     path = Path(filename)
+    floor_path = Path(FLOOR_FILE)
+
     if not path.exists():
-        raise FileNotFoundError(f"Calibration file not found: {path}")
+        raise FileNotFoundError(f"Calibration not found: {path}")
+    if not floor_path.exists():
+        raise FileNotFoundError(f"Floor calibration not found: {floor_path}")
 
-    with np.load(str(path)) as data:
-        required = ["K1", "dist1", "K2", "dist2", "R", "T",
-                    "image_size1", "image_size2"]
-        missing = [key for key in required if key not in data]
-        if missing:
-            raise RuntimeError(f"Missing calibration data: {missing}")
-
-        return {
+    with np.load(path) as data:
+        position = {
             "K1": data["K1"].copy(),
             "dist1": data["dist1"].copy(),
             "K2": data["K2"].copy(),
@@ -42,6 +43,13 @@ def load_calibration(filename):
             "size1": tuple(data["image_size1"].astype(int)),
             "size2": tuple(data["image_size2"].astype(int)),
         }
+
+    with np.load(floor_path) as floor:
+        position["R_floor"] = floor["R_cam1_to_floor"].copy()
+        position["t_floor"] = floor["t_cam1_to_floor"].reshape(3).copy()
+
+    return position
+
  
 
 def process_and_display(frame, landmarker, timestamp_ms, window_name):
@@ -49,7 +57,6 @@ def process_and_display(frame, landmarker, timestamp_ms, window_name):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
     result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-    
     h, w = frame.shape[:2]
     if result.hand_landmarks:
         for hand in result.hand_landmarks:
@@ -60,7 +67,8 @@ def process_and_display(frame, landmarker, timestamp_ms, window_name):
                 cv2.circle(frame, p, 4, (0, 0, 255), -1)
 
     cv2.imshow(window_name, frame)
-
+    cv2.waitKey(1)
+    
     return result
 
 
@@ -68,119 +76,151 @@ _prev_3d_points = {}
 
 
 def Plot_Hand(position_cam, result_cam1, result_cam2, ax, artists):
-  def get_rays(result, size, K, dist):
-    if result is None or not result.hand_landmarks:
-      return None
-    hand = result.hand_landmarks[0]
-    if len(hand) != 21:
-      return None
 
-    width, height = size
-    pixels = np.array(
-        [[lm.x * width, lm.y * height] for lm in hand], dtype=np.float64
-    ).reshape(-1, 1, 2)
+    def clear_plot():
+        artists[0]._offsets3d = ([], [], [])
+        for line in artists[1:]:
+            line.set_data([], [])
+            line.set_3d_properties([])
 
-    xy = cv2.undistortPoints(pixels, K, dist).reshape(-1, 2)
-    rays = np.column_stack((xy, np.ones(21)))
-    lengths = np.linalg.norm(rays, axis=1, keepdims=True)
-    rays /= np.maximum(lengths, 1e-12)
-    return rays
+    def get_rays(result, size, K, dist):
+        if result is None or not result.hand_landmarks:
+            return None
 
-  cam1_hand = result_cam1.handedness[0][0].category_name
-  cam2_hand = result_cam2.handedness[0][0].category_name
+        hand = result.hand_landmarks[0]
+        if len(hand) != 21:
+            return None
 
-  """
-  if not (cam2_hand == "Left" and cam1_hand == "Left"):
-    print(cam1_hand, cam2_hand)
-    return None
-  """
+        width, height = size
+        pixels = np.array(
+            [[lm.x * width, lm.y * height] for lm in hand],
+            dtype=np.float64
+        ).reshape(-1, 1, 2)
 
-  rays1 = get_rays(
-      result_cam1,
-      position_cam["size1"],
-      position_cam["K1"],
-      position_cam["dist1"],
-  )
-  rays2 = get_rays(
-      result_cam2,
-      position_cam["size2"],
-      position_cam["K2"],
-      position_cam["dist2"],
-  )
-  if rays1 is None or rays2 is None:
-    artists[0]._offsets3d = ([], [], [])
-    for line in artists[1:]:
-      line.set_data([], [])
-      line.set_3d_properties([])
-    return None
+        xy = cv2.undistortPoints(pixels, K, dist).reshape(-1, 2)
+        rays = np.column_stack((xy, np.ones(21)))
+        rays /= np.maximum(
+            np.linalg.norm(rays, axis=1, keepdims=True), 1e-12
+        )
+        return rays
 
-  R = position_cam["R"]
-  T = position_cam["T"]
-  C1 = np.zeros(3)
-  C2 = -R.T @ T
-  rays2 = (R.T @ rays2.T).T
+    rays1 = get_rays(
+        result_cam1, position_cam["size1"],
+        position_cam["K1"], position_cam["dist1"]
+    )
+    rays2 = get_rays(
+        result_cam2, position_cam["size2"],
+        position_cam["K2"], position_cam["dist2"]
+    )
 
-  points = {}
+    if rays1 is None or rays2 is None:
+        clear_plot()
+        return None
 
-  for i, (u, v) in enumerate(zip(rays1, rays2)):
-    w0 = C1 - C2
-    a, b, c = np.dot(u, u), np.dot(u, v), np.dot(v, v)
-    d, e = np.dot(u, w0), np.dot(v, w0)
-    denom = a * c - b * b
-    if denom <= 1e-8 * a * c:
-      points[i] = np.full(3, np.nan)
-      continue
+    # Camera 2 expressed in Camera 1 coordinates.
+    R = position_cam["R"]
+    T = position_cam["T"]
 
-    s = (b * e - c * d) / denom
-    t = (a * e - b * d) / denom
-    if s < 0 or t < 0:
-      points[i] = np.full(3, np.nan)
-      continue
+    C1 = np.zeros(3)
+    C2 = -R.T @ T
+    rays2 = (R.T @ rays2.T).T
 
-    q1 = C1 + s * u
-    q2 = C2 + t * v
-    curr = (q1 + q2) * 0.5 / 1000.0
+    # Camera 1 coordinates -> shared floor coordinates.
+    R_floor = position_cam["R_floor"]
+    t_floor = position_cam["t_floor"]
 
-    if (
-        i in _prev_3d_points
-        and np.all(np.isfinite(curr))
-        and np.all(np.isfinite(_prev_3d_points[i]))
-    ):
-      prev = _prev_3d_points[i]
-      dist = np.linalg.norm(curr - prev)
-      alpha = 0.1 + 0.8 * min(1.0, dist / 0.05)
-      curr = alpha * curr + (1 - alpha) * prev
+    points = {}
 
-    _prev_3d_points[i] = curr
-    points[i] = curr
+    for i, (u, v) in enumerate(zip(rays1, rays2)):
+        w0 = C1 - C2
 
-  valid_keys = [k for k, v in points.items() if np.all(np.isfinite(v))]
-  if not valid_keys:
-    for artist in artists:
-      artist.set_data([], [])
-      if hasattr(artist, "set_3d_properties"):
-        artist.set_3d_properties([])
+        a = np.dot(u, u)
+        b = np.dot(u, v)
+        c = np.dot(v, v)
+        d = np.dot(u, w0)
+        e = np.dot(v, w0)
+
+        denom = a * c - b * b
+
+        if denom <= 1e-8 * a * c:
+            points[i] = np.full(3, np.nan)
+            continue
+
+        s = (b * e - c * d) / denom
+        t = (a * e - b * d) / denom
+
+        if s < 0 or t < 0:
+            points[i] = np.full(3, np.nan)
+            continue
+
+        q1 = C1 + s * u
+        q2 = C2 + t * v
+
+        # Triangulated point in Camera 1 coordinates, millimetres.
+        point_cam1 = (q1 + q2) * 0.5
+
+        # Transform into the floor coordinate system BEFORE
+        # converting millimetres to metres.
+        point_floor = R_floor @ point_cam1 + t_floor
+        curr = point_floor / 1000.0
+        curr[2] *= -1
+        curr[1] *= -1
+
+        # Smooth each landmark independently.
+        if (
+            i in _prev_3d_points
+            and np.all(np.isfinite(curr))
+            and np.all(np.isfinite(_prev_3d_points[i]))
+        ):
+            prev = _prev_3d_points[i]
+            distance = np.linalg.norm(curr - prev)
+            alpha = 0.1 + 0.8 * min(1.0, distance / 0.05)
+            curr = alpha * curr + (1 - alpha) * prev
+
+        if np.all(np.isfinite(curr)):
+            _prev_3d_points[i] = curr
+
+        points[i] = curr
+
+    valid = [
+        k for k, p in points.items()
+        if np.all(np.isfinite(p))
+    ]
+
+    if not valid:
+        clear_plot()
+        return points
+
+    xyz = np.array([points[k] for k in valid])
+
+    artists[0]._offsets3d = (
+        xyz[:, 0], xyz[:, 1], xyz[:, 2]
+    )
+
+    for line, (a, b) in zip(artists[1:], HAND_CONNECTIONS):
+        if (
+            a in points and b in points
+            and np.all(np.isfinite(points[a]))
+            and np.all(np.isfinite(points[b]))
+        ):
+            p1, p2 = points[a], points[b]
+
+            line.set_data([p1[0], p2[0]], [p1[1], p2[1]])
+            line.set_3d_properties([p1[2], p2[2]])
+        else:
+            line.set_data([], [])
+            line.set_3d_properties([])
+
+    centre = (xyz.min(axis=0) + xyz.max(axis=0)) / 2
+    radius = max(np.ptp(xyz, axis=0).max() * 0.6, 0.05)
+
+    ax.set_xlim(centre[0] - radius, centre[0] + radius)
+    ax.set_ylim(centre[1] - radius, centre[1] + radius)
+    ax.set_zlim(centre[2] - radius, centre[2] + radius)
+
+    ax.set_xlabel("Floor X (m)")
+    ax.set_ylabel("Floor Y (m)")
+    ax.set_zlabel("Height Z (m)")
+
     return points
 
-  xyz = np.array([points[k] for k in valid_keys])
-  artists[0]._offsets3d = (xyz[:, 0], xyz[:, 1], xyz[:, 2])
-
-  for line, (a, b) in zip(artists[1:], HAND_CONNECTIONS):
-    if (
-        a in points
-        and b in points
-        and np.all(np.isfinite(points[a]))
-        and np.all(np.isfinite(points[b]))
-    ):
-      line.set_data([points[a][0], points[b][0]], [points[a][1], points[b][1]])
-      line.set_3d_properties([points[a][2], points[b][2]])
-    else:
-      line.set_data([], [])
-      line.set_3d_properties([])
-
-  centre = (xyz.min(axis=0) + xyz.max(axis=0)) / 2
-  radius = max(np.ptp(xyz, axis=0).max() * 0.6, 0.05)
-  ax.set_xlim(centre[0] - radius, centre[0] + radius)
-  ax.set_ylim(centre[1] - radius, centre[1] + radius)
-  ax.set_zlim(centre[2] - radius, centre[2] + radius)
-  return points 

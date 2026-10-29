@@ -9,12 +9,12 @@ import numpy as np
 # CONFIGURATION
 # ============================================================
 
-CAM1_SOURCE = 0
+CAM1_SOURCE = 6
 CAM2_SOURCE = 4
 
 OUTPUT_FILE = "Utils/webcam-calibration.npz"
 
-NUM_VIEWS = 10
+NUM_VIEWS = 20
 CAPTURE_INTERVAL = 2.0
 MIN_CORNERS = 6
 

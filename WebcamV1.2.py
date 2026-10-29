@@ -35,6 +35,7 @@ cam2 = cv2.VideoCapture(4)
 landmarker_cam1 = mp.tasks.vision.HandLandmarker.create_from_options(options)
 landmarker_cam2 = mp.tasks.vision.HandLandmarker.create_from_options(options)
 
+
 if not cam1.isOpened() or not cam2.isOpened():
     cam1.release()
     cam2.release()
@@ -67,7 +68,7 @@ last2 = -1
 
 STATE = {
     "THUMB": 0,
-"INDEX": 0,
+    "INDEX": 0,
     "MIDDLE": 0,
     "RING": 0,
     "PINKY": 0,
@@ -146,7 +147,7 @@ try:
                         passed = False
 
                 if passed == True:
-                    target = np.array(Postion[0]) + np.array([0.1, 0.0, -0.3])
+                    target = np.array(Postion[0]) * np.array([0.0, 0.0, -1.0])
                     move_to_target(target)
                     print(target)
 
