@@ -9,7 +9,7 @@ import numpy as np
 # CONFIGURATION
 # ============================================================
 
-CAM1_SOURCE = 6
+CAM1_SOURCE = 2
 CAM2_SOURCE = 4
 
 OUTPUT_FILE = "Utils/webcam-calibration.npz"

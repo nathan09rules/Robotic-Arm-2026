@@ -2,6 +2,7 @@ import cv2
 import time
 import threading
 from pathlib import Path
+import asyncio
 
 import numpy as np
 import mediapipe as mp
@@ -11,6 +12,14 @@ import matplotlib.pyplot as plt
 from Utils.Webcam import *
 from Utils.BlenderArm import finger, HandState
 from Utils.Arm import move_to_target
+
+arm_loop = asyncio.new_event_loop()
+
+def run_arm_loop():
+    asyncio.set_event_loop(arm_loop)
+    arm_loop.run_forever()
+
+threading.Thread(target=run_arm_loop, daemon=True).start()
 
 X_LIMIT = (-0.25, 0.25)
 Y_LIMIT = (-0.25, 0.25)
@@ -30,8 +39,12 @@ options = mp.tasks.vision.HandLandmarkerOptions(
     min_tracking_confidence = 0.8
 )
 
-cam1 = cv2.VideoCapture(2)
-cam2 = cv2.VideoCapture(4)
+CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
+CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
+
+cam1 = cv2.VideoCapture(CAM1_SOURCE)
+cam2 = cv2.VideoCapture(CAM2_SOURCE)
+
 landmarker_cam1 = mp.tasks.vision.HandLandmarker.create_from_options(options)
 landmarker_cam2 = mp.tasks.vision.HandLandmarker.create_from_options(options)
 
@@ -99,7 +112,7 @@ try:
 
         if Postion:
             Bone = [
-                ["THUMB",4, 13, 0.06, 0, 2],
+                ["THUMB",3, 5, 0.06, 0, 2],
                 ["INDEX", 8, 5, 0.06, 0, 2],
                 ["MIDDLE", 12, 9, 0.06, 0, 2],
                 ["RING", 16, 13, 0.06, 0, 2],
@@ -136,21 +149,31 @@ try:
             if Input_Joint:
                 finger(Input_Joint, Input_state)
 
-            
-            STATE = HandState()
-            Conditions_Code = [["track", ["THUMB", 0], ["INDEX", 0], ["MIDDLE", 0], ["RING", 0], ["PINKY", 0]]]
+            def check_hand():
+                STATE = HandState()
 
-            for state in Conditions_Code:
-                passed = True
-                for bone_num in state[1::]:
-                    if STATE[bone_num[0]] != bone_num[1]:
-                        passed = False
+                Conditions_Code = [
+                    ["track", ["THUMB", 0], ["INDEX", 0], ["MIDDLE", 0],
+                     ["RING", 0], ["PINKY", 0]]
+                ]
 
-                if passed == True:
-                    target = np.array(Postion[0]) * np.array([0.0, 0.0, -1.0])
-                    move_to_target(target)
-                    print(target)
+                for state in Conditions_Code:
+                    passed = all(
+                        STATE[bone[0]] == bone[1]
+                        for bone in state[1:]
+                    )
 
+                    target = Postion[0]
+
+                    #print("Tracking:", passed, "Target:", target)
+
+                    asyncio.run_coroutine_threadsafe(
+                        move_to_target(target,),
+                        arm_loop
+                    )
+
+            check_hand()
+              
         plt.pause(0.001)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):

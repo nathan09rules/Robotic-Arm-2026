@@ -97,54 +97,153 @@ ESP32_IP = "192.168.4.1"
 PORT = 8888
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+
+
 Procedures = {
-    "claw":[
-    [0,60],
-    [-1, 3],
-    [0,100],
-    []
+    "claw": [
+        [0, 60],
+        [-1, 0.3],
+        [0, 100],
     ],
-    "mv":[
-    [4,120],
-    [0,60],
-    [-1,2],
-    [4,70],
-    [0,100]
+
+    "open": [
+        [0, 100],
+        [4, 70],
+        [-1, 0.3],
+    ],
+
+    "grab": [
+        [4, 120],
+        [-1, 0.3],
+        [0, 60],
+    ],
+
+    "release": [
+        [0, 100],
+        [4, 70],
+    ],
+
+    "wave": [
+        [14, 60],
+        [-1, 0.3],
+        [14, 120],
+        [-1, 0.3],
+        [14, 60],
+        [-1, 0.3],
+        [14, 120],
+        [14, 90],
+    ],
+
+    "nod": [
+        [13, 60],
+        [-1, 0.3],
+        [13, 100],
+        [-1, 0.3],
+        [13, 80],
+    ],
+
+    "point": [
+        [15, 80],
+        [14, 90],
+        [13, 100],
+    ],
+
+    "home": [
+        [14, 135],
+        [13, 80],
+        [15, 120],
+    ],
+
+    "demo": [
+        ["PROC", "open"],
+        [-1, 0.5],
+        ["PROC", "grab"],
+        [-1, 0.5],
+        ["PROC", "release"],
+        ["PROC", "home"],
     ],
 
     "NOT": [
-    [4,120],
-    [0,60],
-    [-1,2],
-    [4,70],
-    ["IK", 0.3, 0.4, 0.1],
-    [0,100]   
-   ]
-    }
+        [4, 120],
+        [0, 60],
+        [-1, 0.3],
+        [4, 70],
+        ["IK", 0.3, 0.4, 0.1],
+        [0, 100],
+    ],
+}
+
+
 last_done = ""
 
-def finger(finger_name, state):
-    if finger_name in STATE and STATE[finger_name] != state:
-        STATE[finger_name] = state
-        Tranform = Position[finger_name][state]
-        #for bone in Tranform:
-        #    await send_pose(str(bone[0]), bone[1][0], bone[1][1], bone[1][2])
 
 Conditions_Robo = [
-    ["claw", ["THUMB", 0], ["INDEX", 2], ["MIDDLE", 2], ["RING", 0], ["PINKY", 0]]
+    [
+        "grab",
+        ["THUMB", 0],
+        ["INDEX", 2],
+        ["MIDDLE", 2],
+        ["RING", 0],
+        ["PINKY", 0],
+    ],
+
+    [
+        "open",
+        ["THUMB", 2],
+        ["INDEX", 2],
+        ["MIDDLE", 2],
+        ["RING", 2],
+        ["PINKY", 2],
+    ],
+
+    [
+        "point",
+        ["INDEX", 2],
+        ["MIDDLE", 0],
+        ["RING", 0],
+        ["PINKY", 0],
+    ],
+
+    [
+        "claw",
+        ["THUMB", 0],
+        ["INDEX", 0],
+        ["MIDDLE", 0],
+        ["RING", 0],
+        ["PINKY", 0],
+    ],
 ]
 
 
+def finger(finger_name, state):
+    if finger_name not in STATE:
+        return
+
+    if state not in Position.get(finger_name, {}):
+        return
+
+    STATE[finger_name] = state
+
+
 def HandState():
-     for state in Conditions_Robo:
-        passed = True
-        for bone_num in state[1::]:
-            if STATE[bone_num[0]] != bone_num[1]:
-                passed = False
+    global last_done
 
-        if passed == True and state[0] != last_done:
-            #print(run_procedure(state[0])) 
-            break
-     return STATE
+    for condition in Conditions_Robo:
+        procedure_name = condition[0]
 
-        
+        passed = all(
+            STATE[finger_name] == expected_state
+            for finger_name, expected_state in condition[1:]
+        )
+
+        if passed:
+            if procedure_name != last_done:
+                print(procedure_name)
+                run_procedure(procedure_name)
+                last_done = procedure_name
+
+            return STATE
+
+    last_done = ""
+    return STATE
+
