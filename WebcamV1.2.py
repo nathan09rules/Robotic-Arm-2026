@@ -10,12 +10,11 @@ import matplotlib.pyplot as plt
 #CUSTOM CODE
 from Utils.Webcam import *
 from Utils.BlenderArm import finger, HandState
+from Utils.Arm import move_to_target
 
-# ==================== PLOT AXIS LIMIT CONFIGURATION ====================
 X_LIMIT = (-0.25, 0.25)
 Y_LIMIT = (-0.25, 0.25)
 Z_LIMIT = ( 0.0, 0.5)
-# =======================================================================
 
 calibration = load_calibration(CALIBRATION_FILE)
 print("Loaded stereo calibration:", CALIBRATION_FILE)
@@ -147,7 +146,9 @@ try:
                         passed = False
 
                 if passed == True:
-                    print(Postion[0])  
+                    target = np.array(Postion[0]) + np.array([0.1, 0.0, -0.3])
+                    move_to_target(target)
+                    print(target)
 
         plt.pause(0.001)
 

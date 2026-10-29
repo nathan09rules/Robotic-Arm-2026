@@ -143,7 +143,7 @@ def HandState():
                 passed = False
 
         if passed == True and state[0] != last_done:
-            print(run_procedure(state[0])) 
+            #print(run_procedure(state[0])) 
             break
      return STATE
 

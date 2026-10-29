@@ -1,54 +1,103 @@
 import socket
 import time
-from Utils import Arm
+import pygame
+import matplotlib.pyplot as plt
+import math
 
 ESP32_IP = "192.168.4.1"
 PORT = 8888
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+def send_cmd(payload: str):
+    sock.sendto(payload.encode('utf-8'), (ESP32_IP, PORT))
+
 Procedures = {
     "claw": [
-        [0, 40],
-        [-1, 1],
-        [0, 100],
+        [0, 60],
+        [-1, 3],
+        [0, 100]
     ],
+    "mv": [
+        [4, 120],
+        [0, 60],
+        [-1, 2],
+        [4, 70],
+        [0, 100]
+    ],
+    "NOT": [
+        [4, 120],
+        [0, 60],
+        [-1, 2],
+        [4, 70],
+        ["IK", 0.3, 0.4, 0.1],
+        [0, 100]    
+    ]
 }
 
-def send_cmd(payload: str):
-    payload = payload.strip()
-    if payload.lower() == "claw":
-        current = Procedures["claw"]
-        for i in current:
-            print(i)
-            if i[0] == -1:
-                time.sleep(i[1])
-            else:
-                send_cmd(f"{i[0]}:{i[1]}")
-    else:
-        sock.sendto(payload.encode('utf-8'), (ESP32_IP, PORT))
+def run_procedure(name_or_steps):
+    steps = Procedures.get(name_or_steps, name_or_steps)
+    for step in steps:
+        if not step:
+            continue
+        if step[0] == -1:
+            duration = step[1]
+            send_cmd(f"-1:{duration:.2f}")
+            start_time = time.time()
+            while time.time() - start_time < duration:
+                plt.pause(0.05)
+        else:
+            ch, val = step[0], step[1]
+            send_cmd(f"{ch}:{val:.2f}")
 
-if __name__ == "__main__":
-    print("Waking up Wi-Fi network bridge...")
-    send_cmd("ARM")
-    time.sleep(1.5)
-    
-    while True:
-        try:
-            user_msg = input("\nEnter channel:angle, x,y,z, or 'OFF': ").strip()
-            if not user_msg:
-                continue
-            if user_msg.upper() == "OFF":
-                send_cmd("OFF")
-                break
-                
-            if "," in user_msg and ":" not in user_msg:
-                parts = [float(v.strip()) for v in user_msg.split(",")]
-                if len(parts) == 3:
-                    Arm.move_to_target(parts)
-                    continue
+pygame.init()
+pygame.joystick.init()
 
-            send_cmd(user_msg)
-            
-        except KeyboardInterrupt:
-            send_cmd("OFF")
-            break
+if pygame.joystick.get_count() == 0:
+    print("No controller detected.")
+    exit()
+
+controller = pygame.joystick.Joystick(0)
+controller.init()
+
+plt.ion()
+fig = plt.figure()
+ax = fig.add_subplot(projection='3d')
+ax.set_xlim(-1, 1)
+ax.set_ylim(-1, 1)
+ax.set_zlim(-1, 1)
+ax.set_axis_off()
+
+scatter = ax.scatter([0], [0], [0], c='r', s=100)
+running = True
+
+send_cmd("ARM")
+time.sleep(1.5)
+
+try:
+    while running:
+        pygame.event.pump()
+        x = controller.get_axis(0)
+        y = -controller.get_axis(1)
+        z = -controller.get_axis(3)
+
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.JOYBUTTONDOWN:
+                if event.button == 2:
+                    send_cmd("ARM")
+                elif event.button == 1:
+                    send_cmd("OFF")
+                elif event.button == 3:
+                    run_procedure("claw")
+                elif event.button == 4:
+                    run_procedure("mv")
+                print(event.button)
+
+except KeyboardInterrupt:
+    send_cmd("OFF")
+finally:
+    send_cmd("OFF")
+    plt.ioff()
+    pygame.quit()
