@@ -7,8 +7,15 @@ import numpy as np
 import mediapipe as mp
 import matplotlib.pyplot as plt
 
+#CUSTOM CODE
 from Utils.Webcam import *
 from Utils.BlenderArm import finger, HandState
+
+# ==================== PLOT AXIS LIMIT CONFIGURATION ====================
+X_LIMIT = (-0.25, 0.25)
+Y_LIMIT = (-0.25, 0.25)
+Z_LIMIT = ( 0.0, 0.5)
+# =======================================================================
 
 calibration = load_calibration(CALIBRATION_FILE)
 print("Loaded stereo calibration:", CALIBRATION_FILE)
@@ -45,6 +52,10 @@ ax.set_ylabel("Y (m)")
 ax.set_zlabel("Z (m)")
 ax.set_title("Triangulated 3D Hand")
 
+ax.set_xlim(X_LIMIT)
+ax.set_ylim(Y_LIMIT)
+ax.set_zlim(Z_LIMIT)
+
 scatter = ax.scatter([], [], [], color="red", s=20)
 lines = [ax.plot([], [], [], color="green", linewidth=2)[0]
          for _ in HAND_CONNECTIONS]
@@ -55,33 +66,15 @@ last1 = -1
 last2 = -1
 
 
-#EMERGENCY CONTROLER USE
-import pygame
+STATE = {
+    "THUMB": 0,
+"INDEX": 0,
+    "MIDDLE": 0,
+    "RING": 0,
+    "PINKY": 0,
+}
 
-pygame.init()
-pygame.joystick.init()
-if pygame.joystick.get_count() > 0:
-    controller = pygame.joystick.Joystick(0)
-    controller.init()
-else:
-    controller = None
-
-def check_controller():
-    if controller is None:
-        return None
-    pygame.event.pump()
-    for event in pygame.event.get():
-        if event.type == pygame.JOYBUTTONDOWN:
-            if event.button == 2:  # Example: Button 2 for ARM
-                send_cmd("ARM")
-                return "ARM"
-            if event.button == 1:  # Example: Button 1 for OFF/Emergency Stop
-                send_cmd("OFF")
-                return "OFF"
-    return None
-
-
-
+active_traking = False
 try:
     while True:
         ret1, frame1 = cam1.read()
@@ -95,57 +88,67 @@ try:
 
         result1 = process_and_display(frame1, landmarker_cam1, ts1, "Camera 1")
         result2 = process_and_display(frame2, landmarker_cam2, ts2, "Camera 2")
+        if result1.hand_landmarks == [] or result2.hand_landmarks == []:
+            continue
+
+        Postion = Plot_Hand(calibration, result1, result2, ax, artists)
         
-        if result1.hand_landmarks and result2.hand_landmarks:
-            Postion = Plot_Hand(calibration, result1, result2, ax, artists)
-            if Postion:
-                Bone = [
-                    ["THUMB", 4, 13, 0.06, 0, 2],
-                    ["INDEX", 8, 5, 0.06, 0, 2],
-                    ["MIDDLE", 12, 9, 0.06, 0, 2],
-                    ["RING", 16, 13, 0.06, 0, 2],
-                    ["PINKY", 20, 17, 0.06, 0, 2],
-                ]
+        ax.set_xlim(X_LIMIT)
+        ax.set_ylim(Y_LIMIT)
+        ax.set_zlim(Z_LIMIT)
 
-                SPEACIAL_STATES = [
-                    ["INDEX-THUMB", 4, 8, 0.02, 0, -1],
-                ]
+        if Postion:
+            Bone = [
+                ["THUMB",4, 13, 0.06, 0, 2],
+                ["INDEX", 8, 5, 0.06, 0, 2],
+                ["MIDDLE", 12, 9, 0.06, 0, 2],
+                ["RING", 16, 13, 0.06, 0, 2],
+                ["PINKY", 20, 17, 0.06, 0, 2],
+            ]
+
+            SPEACIAL_STATES = [
+                ["INDEX-THUMB", 4, 8, 0.02, 0, -1],
+            ]
                 
-                output = ""
-                Pause_Time = 0
-                Input_Joint, Input_state = "", 0
+            output = ""
+            Pause_Time = 0
+            Input_Joint, Input_state = "",0
+            def dist(bone1, bone2):
+                return np.linalg.norm(Postion[bone1] - Postion[bone2])
 
-                for Joint in Bone:
-                    distance = np.linalg.norm(Postion[Joint[1]] - Postion[Joint[2]])
-                    if distance < Joint[3]:
-                        finger(Joint[0], Joint[4])
-                        state = "CURLED"
-                    else:
-                        finger(Joint[0], Joint[5])
-                        state = "EXTENDED"
+            for Joint in Bone:
+                distance = np.linalg.norm(Postion[Joint[1]] - Postion[Joint[2]])
+                if distance < Joint[3]:
+                    finger(Joint[0], Joint[4])
+                    state = "CURLED"
+                else:
+                    finger(Joint[0], Joint[5])
+                    state = "EXTENDED"
 
-                for Joint in SPEACIAL_STATES:
-                    distance = np.linalg.norm(Postion[Joint[1]] - Postion[Joint[2]])
-                    if distance < Joint[3]:
-                        finger(Joint[0], Joint[4])
-                        state = "TRUE"
-                    else:
-                        state = "FALSE"
+            for Joint in SPEACIAL_STATES:
+                distance = np.linalg.norm(Postion[Joint[1]] - Postion[Joint[2]])
+                if distance < Joint[3]:
+                    finger(Joint[0], Joint[4])
+                    state = "TRUE"
+                else:
+                    state = "FALSE"
 
-                if Input_Joint:
-                    finger(Input_Joint, Input_state)
-                
-                #ALL FINGERS ARE PROCESSED
-                HandState()
+            if Input_Joint:
+                finger(Input_Joint, Input_state)
 
-        else:
-            artists[0]._offsets3d = ([], [], [])
-            for line in artists[1:]:
-                line.set_data([], [])
-                line.set_3d_properties([])
-        
-        #FINAL EMEREGENCY CHECKS
-        check_controller()
+            
+            STATE = HandState()
+            Conditions_Code = [["track", ["THUMB", 0], ["INDEX", 0], ["MIDDLE", 0], ["RING", 0], ["PINKY", 0]]]
+
+            for state in Conditions_Code:
+                passed = True
+                for bone_num in state[1::]:
+                    if STATE[bone_num[0]] != bone_num[1]:
+                        passed = False
+
+                if passed == True:
+                    print(Postion[0])  
+
         plt.pause(0.001)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):

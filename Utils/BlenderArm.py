@@ -130,18 +130,21 @@ def finger(finger_name, state):
         #for bone in Tranform:
         #    await send_pose(str(bone[0]), bone[1][0], bone[1][1], bone[1][2])
 
-Conditions = [
+Conditions_Robo = [
     ["claw", ["THUMB", 0], ["INDEX", 2], ["MIDDLE", 2], ["RING", 0], ["PINKY", 0]]
 ]
 
+
 def HandState():
-     for state in Conditions:
+     for state in Conditions_Robo:
         passed = True
         for bone_num in state[1::]:
             if STATE[bone_num[0]] != bone_num[1]:
                 passed = False
 
         if passed == True and state[0] != last_done:
-            print(run_procedure(state[0]))   
+            print(run_procedure(state[0])) 
+            break
+     return STATE
 
         
