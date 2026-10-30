@@ -149,7 +149,7 @@ try:
             if Input_Joint:
                 finger(Input_Joint, Input_state)
 
-            def check_hand():
+            async def check_hand():
                 STATE = HandState()
 
                 Conditions_Code = [
@@ -165,14 +165,10 @@ try:
 
                     target = Postion[0]
 
-                    #print("Tracking:", passed, "Target:", target)
+                    #await move_to_target(target, traking=passed)
 
-                    asyncio.run_coroutine_threadsafe(
-                        move_to_target(target,),
-                        arm_loop
-                    )
 
-            check_hand()
+            asyncio.run(check_hand())
               
         plt.pause(0.001)
 
