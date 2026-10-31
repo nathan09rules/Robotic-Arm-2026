@@ -164,6 +164,8 @@ def Plot_Hand(position_cam, result_cam1, result_cam2, ax, artists):
         point_floor = R_floor @ point_cam1 + t_floor
         curr = point_floor / 1000.0
 
+        curr[2] *= -1
+        curr[1] *= -1
         # Smooth each landmark independently.
         if (
             i in _prev_3d_points

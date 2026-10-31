@@ -16,8 +16,8 @@ from Utils.Arm import move_to_target
 CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
 CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
 
-X_LIMIT = (-0.25, 0.2)
-Y_LIMIT = (-0.25, 0.25)
+X_LIMIT = (-0.2, 0.2)
+Y_LIMIT = (-0.2, 0.2)
 Z_LIMIT = (0.0, 0.5)
 
 
