@@ -1,7 +1,6 @@
-
-
 import cv2
 import numpy as np
+from pathlib import Path
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 
@@ -40,7 +39,7 @@ class BoundaryTracker:
         ]
 
         self.labels = [
-            ax.text(0, 0, 0, str(i), color="orange")
+            ax.text(0, 0, 0, str(i), color="orange", visible=False)
             for i in self.ids
         ]
 
@@ -167,24 +166,31 @@ class BoundaryTracker:
     # Draw the final calibrated boundary once.
     def set_boundary(self, points):
 
+        if not points:
+            print("Warning: No boundary points provided.")
+            return
+
         missing = [
             marker_id for marker_id in self.ids
             if marker_id not in points
         ]
 
         if missing:
-            raise ValueError(
-                f"Missing boundary markers: {missing}"
-            )
+            print(f"Warning: Boundary missing markers: {missing}")
+
+        active_ids = [mid for mid in self.ids if mid in points]
+        if not active_ids:
+            print("Warning: No matching boundary markers found.")
+            return
 
         self.calibrated_points = {
             marker_id: np.asarray(points[marker_id], dtype=float).copy()
-            for marker_id in self.ids
+            for marker_id in active_ids
         }
 
         xyz = np.array([
             self.calibrated_points[i]
-            for i in self.ids
+            for i in active_ids
         ])
 
         self.marker_scatter._offsets3d = (
@@ -193,15 +199,15 @@ class BoundaryTracker:
             xyz[:, 2]
         )
 
-        for i, marker_id in enumerate(self.ids):
+        for i, marker_id in enumerate(active_ids):
 
             p1 = self.calibrated_points[marker_id]
 
-            next_id = self.ids[(i + 1) % len(self.ids)]
+            next_id = active_ids[(i + 1) % len(active_ids)]
             p2 = self.calibrated_points[next_id]
 
-            self.labels[i].set_position_3d(p1)
-            self.labels[i].set_visible(True)
+            self.labels[marker_id].set_position_3d(p1)
+            self.labels[marker_id].set_visible(True)
 
             self.lines[i].set_data(
                 [p1[0], p2[0]],
@@ -212,7 +218,42 @@ class BoundaryTracker:
                 [p1[2], p2[2]]
             )
 
-        self.surface.set_verts([
-            [self.calibrated_points[i] for i in self.ids]
-        ])
+        # Clear unused lines
+        for i in range(len(active_ids), len(self.lines)):
+            self.lines[i].set_data([], [])
+            self.lines[i].set_3d_properties([])
 
+        # Hide missing labels
+        for mid in self.ids:
+            if mid not in self.calibrated_points:
+                self.labels[mid].set_visible(False)
+
+        if len(active_ids) >= 3:
+            self.surface.set_verts([
+                [self.calibrated_points[i] for i in active_ids]
+            ])
+        else:
+            self.surface.set_verts([])
+
+    def load_boundary(self, filepath=None):
+        if filepath is None:
+            filepath = Path(__file__).resolve().parent / "boundry.npz"
+        path = Path(filepath)
+        if not path.exists():
+            print(f"Boundary file not found at: {path}")
+            return None
+
+        with np.load(path) as data:
+            if "ids" in data and "points" in data:
+                pts = {int(mid): pt.copy() for mid, pt in zip(data["ids"], data["points"])}
+            else:
+                pts = {}
+                for k in data.files:
+                    try:
+                        mid = int(k.replace("marker_", ""))
+                        pts[mid] = data[k].copy()
+                    except ValueError:
+                        pass
+
+        self.set_boundary(pts)
+        return pts

@@ -123,19 +123,27 @@ def triangulate(p1, p2, calibration):
 
 
 def main():
-    calibration = load_calibration()
+    calibration = load_calibration(CALIBRATION_FILE)
     if calibration is None:
+        print("Error: Could not load calibration.")
         return
 
     cap1 = cv2.VideoCapture(CAM1_SOURCE)
     cap2 = cv2.VideoCapture(CAM2_SOURCE)
 
     if not cap1.isOpened() or not cap2.isOpened():
+        cap1.release()
+        cap2.release()
+        print("Error: Could not open both cameras.")
         return
 
     dictionary, parameters, detector = create_detector()
     marker_samples = {mid: [] for mid in MARKER_IDS}
     start_time = time.time()
+    last_second = -1
+
+    print("Keep all boundary markers (0 to 5) visible in both cameras...")
+    print(f"Calibrating boundary for {CALIBRATION_TIME} seconds.")
 
     while time.time() - start_time < CALIBRATION_TIME:
         ret1, frame1 = cap1.read()
@@ -153,6 +161,11 @@ def main():
             if pt is not None:
                 marker_samples[mid].append(pt)
 
+        elapsed = int(time.time() - start_time)
+        if elapsed != last_second:
+            last_second = elapsed
+            print(f"Calibrating... {CALIBRATION_TIME - elapsed} seconds remaining")
+
         cv2.imshow("Cam 1", frame1)
         cv2.imshow("Cam 2", frame2)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -163,12 +176,32 @@ def main():
     cv2.destroyAllWindows()
 
     boundary_points = {}
-    for mid, samples in marker_samples.items():
-        if len(samples) >= MIN_MARKER_SAMPLES:
-            boundary_points[f"marker_{mid}"] = np.mean(samples, axis=0)
+    valid_ids = []
+    valid_points = []
 
-    if boundary_points:
-        np.savez(BOUNDARY_FILE, **boundary_points)
+    print("\nBoundary calibration results:")
+    for mid, samples in marker_samples.items():
+        print(f"Marker {mid}: {len(samples)} samples")
+        if len(samples) >= MIN_MARKER_SAMPLES:
+            med_pt = np.median(np.asarray(samples), axis=0)
+            boundary_points[f"marker_{mid}"] = med_pt
+            valid_ids.append(mid)
+            valid_points.append(med_pt)
+
+    if valid_ids:
+        np.savez(
+            BOUNDARY_FILE,
+            ids=np.array(valid_ids, dtype=int),
+            points=np.array(valid_points, dtype=float),
+            **boundary_points
+        )
+        print(f"\nBoundary successfully saved to {BOUNDARY_FILE}")
+        print(f"Valid markers: {valid_ids}")
+        missing = [m for m in MARKER_IDS if m not in valid_ids]
+        if missing:
+            print(f"Warning: Markers without enough samples: {missing}")
+    else:
+        print("\nError: No markers had enough samples to save boundary.")
 
 
 if __name__ == "__main__":

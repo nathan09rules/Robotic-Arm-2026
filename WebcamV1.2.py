@@ -1,4 +1,5 @@
 import cv2
+import time
 import threading
 import asyncio
 
@@ -7,6 +8,7 @@ import mediapipe as mp
 import matplotlib.pyplot as plt
 
 from Utils.Webcam import *
+from Utils.Boundry import BoundaryTracker
 from Utils.BlenderArm import finger, HandState
 from Utils.Arm import move_to_target
 
@@ -30,7 +32,7 @@ def run_arm_loop():
 arm_thread = threading.Thread(target=run_arm_loop, daemon=True)
 arm_thread.start()
 
-calibration = load_calibration()
+calibration = load_calibration(CALIBRATION_FILE)
 
 cam1 = cv2.VideoCapture(CAM1_SOURCE)
 cam2 = cv2.VideoCapture(CAM2_SOURCE)
@@ -77,6 +79,7 @@ hand_lines = [
 hand_artists = [hand_scatter] + hand_lines
 
 boundary = BoundaryTracker(ax)
+boundary.load_boundary()
 
 ax.set_xlim(X_LIMIT)
 ax.set_ylim(Y_LIMIT)
