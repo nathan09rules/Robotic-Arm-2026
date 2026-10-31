@@ -16,6 +16,7 @@ CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
 
 MARKER_IDS = list(range(6))
 CALIBRATION_TIME = 10
+
 MIN_MARKER_SAMPLES = 5
 
 
