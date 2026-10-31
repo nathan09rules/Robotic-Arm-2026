@@ -16,7 +16,7 @@ from Utils.Arm import move_to_target
 CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
 CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
 
-X_LIMIT = (-0.25, 0.25)
+X_LIMIT = (-0.25, 0.2)
 Y_LIMIT = (-0.25, 0.25)
 Z_LIMIT = (0.0, 0.5)
 
@@ -194,6 +194,11 @@ try:
         ax.set_xlim(X_LIMIT)
         ax.set_ylim(Y_LIMIT)
         ax.set_zlim(Z_LIMIT)
+
+        if Position is not None:
+            print(Position[0])
+            #asyncio.run(move_to_target(Position[0], traking=True))
+
 
         plt.pause(0.001)
 

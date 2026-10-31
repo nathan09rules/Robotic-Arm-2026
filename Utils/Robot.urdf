@@ -1,0 +1,126 @@
+<?xml version="1.0"?>
+<robot name="arm_13_15_4_uncalibrated_draft">
+  <!--
+  KINEMATIC DRAFT: user-measured link lengths; angular calibration provisional.
+  Source: user's five photographs and cumulative ESP32 command history.
+
+  EXACT COMMAND HISTORY (commanded values, not measured shaft positions):
+  photo     ch13   ch15   ch4    ch14   ch1   ch0
+    1        70    120   200      90    90    70
+    2        60    120   200      90    90    70
+    3        80     90   200      90    90    70
+    4        80     90    90      90    90    70
+    5        80    110    90      90    90    70
+  The intermediate ch13=100 command was superseded by ch13=80 before photo 3.
+  The numeric ch0 startup is 70 despite the contradictory source-code comment.
+
+  CHAIN: shoulder ch13 -> elbow ch15 -> wrist pitch ch4 -> fixed tool.
+  ch14 stays at 90; ch1 stays at 90; ch0 stays at 70. They are NOT modeled
+  as movable joints. base_link is AT THE CH13 PIVOT, not the table or ch14.
+  Coordinates: +X toward the left of the reference photo, +Z upward,
+  +Y toward the camera. Assume parallel pitch axes and planar links.
+  This is an idealized local frame, not calibrated camera/world coordinates.
+
+  REFERENCE: q13=q15=q4=0 represents the commands in photo 4.
+  PROVISIONAL mapping, assuming one physical degree per command degree:
+    q13 = (command13 - 80) * pi/180
+    q15 = (command15 - 90) * pi/180
+    q4  = (command4  - 90) * pi/180
+  Inverse: command13=80+q13*180/pi, command15=90+q15*180/pi,
+           command4=90+q4*180/pi.
+  URDF does not implement this command conversion; the controller must.
+  Positive rotation about +Y lowers a link initially pointing along +X.
+  Signs are inferred from photos 1/2, 4/5, and 3/4 respectively.
+  Unit gains and reference offsets need calibration; photo perspective,
+  horn offsets, loading and unknown PWM mapping prevent an exact fit.
+  ch4=200 is kept as a command value; it is NOT proof of 200-degree travel.
+
+  ROUGH PHOTO-4 REFERENCE ORIENTATIONS, NOT MEASURED CALIBRATION:
+    upper arm elevation: +80 deg
+    forearm elevation:   +35 deg (relative elbow bend -45 deg)
+    distal tool:         +25 deg (relative wrist bend -10 deg)
+  Therefore joint origin pitches below are -80, +45, +10 degrees.
+  These rough choices do NOT claim to reproduce all five images accurately.
+
+  USER-MEASURED PIVOT-TO-PIVOT LENGTHS (converted from centimeters):
+    L13_15 = 0.105 m: ch13 pivot center to ch15 pivot center
+    L15_4  = 0.125 m: ch15 pivot center to ch4 pivot center
+    L4_EE  = 0.105 m: ch4 pivot center to gripper motor pivot center
+  gripper_end_effector is located at that gripper motor pivot. The final
+  measurement does not specify a fingertip or between-fingers grasp point.
+  A grasp-point frame would require an additional measured fixed offset.
+  Scalar lengths are represented along each link's local +X; parallel axes,
+  planar geometry and zero transverse offsets remain modeling assumptions.
+  Visual boxes are schematic; their widths and thicknesses are placeholders.
+
+  Position limits are ONLY envelopes of commands represented in the photos,
+  converted with the provisional mapping. They are NOT verified mechanical
+  limits or a collision-free range. The unphotographed ch13=100 is excluded.
+  Effort and velocity are zero placeholders: this is not a dynamics/control
+  model. Replace with measured/verified limits before controlled operation.
+  No masses, inertias, collision geometry, transmissions or hardware driver.
+  Before physical IK: verify geometry/offsets and pulse mapping (especially 200),
+  calibrate signs/gains/offsets, and establish joint/collision limits.
+  -->
+
+  <material name="upper_blue"><color rgba="0.15 0.40 0.85 1"/></material>
+  <material name="forearm_orange"><color rgba="0.95 0.55 0.15 1"/></material>
+  <material name="tool_gray"><color rgba="0.35 0.38 0.42 1"/></material>
+
+  <link name="base_link"/>
+
+  <link name="upper_arm_link">
+    <visual>
+      <origin xyz="0.0525 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.105 0.020 0.020"/></geometry>
+      <material name="upper_blue"/>
+    </visual>
+  </link>
+  <joint name="joint_13" type="revolute">
+    <parent link="base_link"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0 0 0" rpy="0 -1.396263401595 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.349065850399" upper="0" effort="0" velocity="0"/>
+  </joint>
+
+  <link name="forearm_link">
+    <visual>
+      <origin xyz="0.0625 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.125 0.018 0.018"/></geometry>
+      <material name="forearm_orange"/>
+    </visual>
+  </link>
+  <joint name="joint_15" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <!-- L13_15 = 10.5 cm, measured between motor pivots. -->
+    <origin xyz="0.105 0 0" rpy="0 0.785398163397 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="0.523598775598" effort="0" velocity="0"/>
+  </joint>
+
+  <link name="distal_tool_link">
+    <visual>
+      <origin xyz="0.0525 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.105 0.015 0.015"/></geometry>
+      <material name="tool_gray"/>
+    </visual>
+  </link>
+  <joint name="joint_4" type="revolute">
+    <parent link="forearm_link"/>
+    <child link="distal_tool_link"/>
+    <!-- L15_4 = 12.5 cm, measured between motor pivots. -->
+    <origin xyz="0.125 0 0" rpy="0 0.174532925199 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.919862177194" effort="0" velocity="0"/>
+  </joint>
+
+  <link name="gripper_end_effector"/>
+  <joint name="gripper_end_effector_fixed" type="fixed">
+    <parent link="distal_tool_link"/>
+    <child link="gripper_end_effector"/>
+    <!-- L4_EE = 10.5 cm to gripper motor pivot; ch1=90 and ch0=70 remain fixed. -->
+    <origin xyz="0.105 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>

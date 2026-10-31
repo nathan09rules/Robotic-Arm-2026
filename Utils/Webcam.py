@@ -15,9 +15,6 @@ HAND_CONNECTIONS = [
     (13, 17), (0, 17), (17, 18), (18, 19), (19, 20)
 ]
 
-
-
-
 CALIBRATION_FILE = "Utils/webcam-calibration.npz"
 FLOOR_FILE = "Utils/floor-calibration.npz"
 MODEL_PATH = "Utils/hand_landmarker.task"
@@ -27,6 +24,7 @@ def load_calibration(filename=CALIBRATION_FILE):
     path = Path(filename)
     if not path.is_absolute() and not path.exists():
         path = Path(__file__).resolve().parent.parent / filename
+
     floor_path = Path(FLOOR_FILE)
     if not floor_path.is_absolute() and not floor_path.exists():
         floor_path = Path(__file__).resolve().parent.parent / FLOOR_FILE
@@ -54,7 +52,6 @@ def load_calibration(filename=CALIBRATION_FILE):
 
     return position
 
- 
 
 def process_and_display(frame, landmarker, timestamp_ms, window_name):
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -72,7 +69,7 @@ def process_and_display(frame, landmarker, timestamp_ms, window_name):
 
     cv2.imshow(window_name, frame)
     cv2.waitKey(1)
-    
+
     return result
 
 
@@ -163,12 +160,9 @@ def Plot_Hand(position_cam, result_cam1, result_cam2, ax, artists):
         # Triangulated point in Camera 1 coordinates, millimetres.
         point_cam1 = (q1 + q2) * 0.5
 
-        # Transform into the floor coordinate system BEFORE
-        # converting millimetres to metres.
+        # Transform into the floor coordinate system.
         point_floor = R_floor @ point_cam1 + t_floor
         curr = point_floor / 1000.0
-        curr[2] *= -1
-        curr[1] *= -1
 
         # Smooth each landmark independently.
         if (
