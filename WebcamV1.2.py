@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from Utils.Webcam import *
 from Utils.Boundry import BoundaryTracker
 from Utils.BlenderArm import finger, HandState
-from Utils.Arm import move_to_target
+from Utils.Arm import move_to_target, draw_arm, current_angles, step_interpolation
 
 
 CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
@@ -19,18 +19,6 @@ CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
 X_LIMIT = (-0.2, 0.2)
 Y_LIMIT = (-0.2, 0.2)
 Z_LIMIT = (0.0, 0.5)
-
-
-arm_loop = asyncio.new_event_loop()
-
-
-def run_arm_loop():
-    asyncio.set_event_loop(arm_loop)
-    arm_loop.run_forever()
-
-
-arm_thread = threading.Thread(target=run_arm_loop, daemon=True)
-arm_thread.start()
 
 calibration = load_calibration(CALIBRATION_FILE)
 
@@ -110,25 +98,28 @@ Conditions_Code = [
     ("PINKY", 0)
 ]
 
+last_target = None
+Position = None
 
-async def check_hand():
+def check_hand():
     STATE = HandState()
-
     passed = all(
         STATE[name] == value
         for name, value in Conditions_Code
     )
-
     return passed
 
-async def special_states(state):
+def special_states(state, pos):
+    global last_target
     if state == "INDEX-THUMB":
-        print(Position[0])
-        await move_to_target(Position[0], traking=False)
+        print(pos)
+        last_target = pos
+        move_to_target(pos, traking=True)
 
 
 timestamp1 = 0
 timestamp2 = 0
+frame_count = 0
 
 try:
     while True:
@@ -138,9 +129,12 @@ try:
         if not ret1 or not ret2:
             continue
 
+        frame_count += 1
+
         timestamp = time.monotonic_ns() // 1_000_000
         timestamp1 = max(timestamp, timestamp1 + 1)
         timestamp2 = max(timestamp, timestamp2 + 1)
+        
 
         result1 = process_and_display(
             frame1, landmarker_cam1, timestamp1, "Camera 1"
@@ -150,62 +144,61 @@ try:
             frame2, landmarker_cam2, timestamp2, "Camera 2"
         )
 
-        Position = None
-
-        if result1.hand_landmarks and result2.hand_landmarks:
-            Position = Plot_Hand(
-                calibration,
-                result1,
-                result2,
-                ax,
-                hand_artists
-            )
-        else:
-            hand_scatter._offsets3d = ([], [], [])
-
-            for line in hand_lines:
-                line.set_data([], [])
-                line.set_3d_properties([])
-
-        required_points = {3, 5, 8, 12, 9, 16, 13, 20, 17, 4}
-
-        hand_valid = (
-            Position is not None
-            and all(
-                i in Position
-                and np.all(np.isfinite(Position[i]))
-                for i in required_points
-            )
-        )
-
-        if hand_valid:
-            for name, joint, reference, threshold, curled, extended in Bone:
-                distance = np.linalg.norm(
-                    Position[joint] - Position[reference]
+        if frame_count % 5 == 0:
+            if result1.hand_landmarks and result2.hand_landmarks:
+                Position = Plot_Hand(
+                    calibration,
+                    result1,
+                    result2,
+                    ax,
+                    hand_artists
                 )
-                finger(name, curled if distance < threshold else extended)
+            else:
+                Position = None
+                hand_scatter._offsets3d = ([], [], [])
+                for line in hand_lines:
+                    line.set_data([], [])
+                    line.set_3d_properties([])
 
-            for name, joint, reference, threshold, true_state, false_state in SPEACIAL_STATES:
-                distance = np.linalg.norm(
-                    Position[joint] - Position[reference]
+            required_points = {3, 5, 8, 12, 9, 16, 13, 20, 17, 4}
+
+            hand_valid = (
+                Position is not None
+                and all(
+                    i in Position
+                    and np.all(np.isfinite(Position[i]))
+                    for i in required_points
                 )
-                if distance < threshold:
-                    finger(
-                        name,
-                        true_state if distance < threshold else false_state
+            )
+
+            if hand_valid:
+                for name, joint, reference, threshold, curled, extended in Bone:
+                    distance = np.linalg.norm(
+                        Position[joint] - Position[reference]
                     )
-                    asyncio.run(special_states(name))
-            asyncio.run(check_hand())
+                    finger(name, curled if distance < threshold else extended)
+
+                for name, joint, reference, threshold, true_state, false_state in SPEACIAL_STATES:
+                    distance = np.linalg.norm(
+                        Position[joint] - Position[reference]
+                    )
+                    if distance < threshold:
+                        finger(
+                            name,
+                            true_state if distance < threshold else false_state
+                        )
+                        special_states(name, Position[0].copy())
+                check_hand()
+
+                last_target = Position[0].copy()
+                move_to_target(last_target, traking=True)
 
         ax.set_xlim(X_LIMIT)
         ax.set_ylim(Y_LIMIT)
         ax.set_zlim(Z_LIMIT)
 
-        if Position is not None:
-            pass
-            #print(Position[0])
-            #asyncio.run(move_to_target(Position[0], traking=True))
-
+        step_interpolation()
+        draw_arm()
 
         plt.pause(0.001)
 
@@ -221,5 +214,3 @@ finally:
 
     cv2.destroyAllWindows()
     plt.close(fig)
-
-    arm_loop.call_soon_threadsafe(arm_loop.stop)
