@@ -141,7 +141,7 @@ try:
             frame2, landmarker_cam2, timestamp2, "Camera 2"
         )
 
-        if frame_count % 2 == 0:
+        if frame_count % 1 == 0:
             if result1.hand_landmarks and result2.hand_landmarks:
                 Position = Plot_Hand(
                     calibration,
@@ -184,7 +184,7 @@ try:
                             name,
                             true_state if distance < threshold else false_state,
                         )
-                        special_states(name, Position[0].copy() * 2)
+                        special_states(name, Position[0].copy())
                 check_hand()
 
 
