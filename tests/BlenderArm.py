@@ -1,33 +1,23 @@
-import socket
+import pygame
 
-def send_pose(bone_name, x, y, z):
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(('127.0.0.1', 9999))
-    client.sendall(f"{bone_name}:{x},{y},{z}".encode())
-    client.close()
+pygame.init()
+pygame.joystick.init()
 
-def get_bone_rotation(bone_name):
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(('127.0.0.1', 9999))
-    client.sendall(f"GET:{bone_name}".encode())
-    response = client.recv(1024).decode()
-    client.close()
-    return tuple(float(v) for v in response.split(","))
+if pygame.joystick.get_count() == 0:
+    print("No controller detected by Pygame!")
+else:
+    controller = pygame.joystick.Joystick(0)
+    controller.init()
+    print(f"Connected: {controller.get_name()}")
+    print(f"Axes: {controller.get_numaxes()}, Buttons: {controller.get_numbuttons()}")
+    print("Move your sticks and press buttons (Ctrl+C to exit)...")
 
-def finger(finger, state):
-    if finger == "THUMB":
-        if state == 2:
-            send_pose("4", 0.75, 0.0, 0.0)
-        if state == 0:
-            send_pose("4", 1.2 ,0.0 ,0.0)
-    
+    try:
+        while True:
+            pygame.event.pump()
+            axes = [controller.get_axis(i) for i in range(controller.get_numaxes())]
+            print(f"Axes values: {[round(a, 2) for a in axes]}", end="\r")
+    except KeyboardInterrupt:
+        print("\nExited.")
 
-
-"""
-
-4 (0.75, 0.0, 0.0)
-3 (0.0, 0.0, 0.0)
-2 (0.0, 0.0, 0.0)
-
-
-"""
+pygame.quit()
