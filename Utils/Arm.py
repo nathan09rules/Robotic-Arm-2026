@@ -1,55 +1,54 @@
-import asyncio
 import math
 import socket
+import time
+import sys
+import select
 from pathlib import Path
 
-import numpy as np
+import pygame
 import matplotlib.pyplot as plt
+import numpy as np
 import ikpy.chain
 from ikpy.link import OriginLink, URDFLink
-
 
 ESP32_IP = "192.168.4.1"
 PORT = 8888
 URDF_PATH = Path(__file__).resolve().with_name("Robot.urdf")
 
 JOINT_CONFIG = {
-    "joint_14": {"channel": 14, "home": 90.0, "direction": 1},
-    "joint_13": {"channel": 13, "home": 80.0, "direction": 1},
-    "joint_15": {"channel": 15, "home": 90.0, "direction": 1},
-    "joint_4":  {"channel": 4,  "home": 90.0, "direction": 1},
+    "joint_14": {"channel": 14, "home": 90.0, "direction": 1, "offset": 0.0},
+    "joint_13": {"channel": 13, "home": 80.0, "direction": 1, "offset": 0.0},
+    "joint_15": {"channel": 15, "home": 90.0, "direction": 1, "offset": 0.0},
+    "joint_4":  {"channel": 4,  "home": 90.0, "direction": 1, "offset": 30.0},
 }
 
 SERVO_COMMAND_LIMITS = {
     14: (0.0, 180.0),
     13: (20.0, 180.0),
     15: (0.0, 180.0),
-    4: (0.0, 180.0),
+    4:  (0.0, 180.0),
 }
 
 IK_LIMIT_OVERRIDES = {
     "joint_13": (-60.0, 60.0),
 }
 
+FOLLOW_BUTTON = 10
 STEPS_PER_UPDATE = 3
 CARTESIAN_STEP_SIZE = 0.005
 IK_MAX_ITER = 80
 IK_TOLERANCE = 0.012
+
+TARGET_XY_RANGE = 0.15
+TARGET_Z_DOWN_LIMIT = 0.10
+TARGET_Z_UP_LIMIT = 0.30
+CONTROLLER_DEADZONE = 0.08
 LOOP_DELAY = 0.01
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-_move_lock = asyncio.Lock()
-_armed = False
-
-
-def send_cmd(payload):
-    sock.sendto(payload.encode("utf-8"), (ESP32_IP, PORT))
-
 
 def build_arm_chain():
     if not URDF_PATH.is_file():
         raise FileNotFoundError(
-            f"Could not find {URDF_PATH.name}. Put Robot.urdf beside Arm.py."
+            f"Could not find {URDF_PATH.name}. Put Robot.urdf beside this Python file."
         )
 
     imported_chain = ikpy.chain.Chain.from_urdf_file(
@@ -61,11 +60,9 @@ def build_arm_chain():
     imported_names = [link.name for link in imported_chain.links]
     required = {"joint_13", "joint_15", "joint_4"}
     missing = required.difference(imported_names)
-
     if missing:
         raise ValueError(
-            "These joints were not found in Robot.urdf: "
-            + ", ".join(sorted(missing))
+            "These joints were not found in Robot.urdf: " + ", ".join(sorted(missing))
         )
 
     base_yaw = URDFLink(
@@ -97,107 +94,32 @@ def build_arm_chain():
     )
 
     joint_indices = {link.name: i for i, link in enumerate(arm.links)}
-
     for name in JOINT_CONFIG:
         if name not in joint_indices:
             raise ValueError(f"Could not locate {name} in the IK chain.")
 
     print("Loaded Robot.urdf")
     print("Active joints: CH14, CH13, CH15, CH4")
-
+    print("Following: hold controller button 10")
+    print("Manual mode: type commands directly in the terminal (e.g., 14:90 or OFF)")
     return arm, joint_indices
 
 
 arm_chain, joint_indices = build_arm_chain()
 current_angles = np.zeros(len(arm_chain.links), dtype=float)
 
-
-# -------------------- PLOT --------------------
-
-plt.ion()
-
-fig = plt.figure()
-ax = fig.add_subplot(111, projection="3d")
-
-ax.set_xlim(-0.30, 0.30)
-ax.set_ylim(-0.30, 0.30)
-ax.set_zlim(-0.15, 0.35)
-
-ax.set_xlabel("X")
-ax.set_ylabel("Y")
-ax.set_zlabel("Z")
-ax.set_title("Robotic Arm — Blue: Arm | Red: Target")
-
-arm_line, = ax.plot(
-    [], [], [],
-    "-o",
-    linewidth=5,
-    markersize=6,
-    color="blue"
-)
-
-arm_endpoint = ax.scatter([], [], [], color="blue", s=50)
-
-target_point = ax.scatter([], [], [], color="red", s=70)
-
-target_guide, = ax.plot(
-    [], [],
-    [],
-    "--",
-    color="red",
-    linewidth=1
-)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
-def draw_arm(angles, target=None):
-    frames = arm_chain.forward_kinematics(
-        angles,
-        full_kinematics=True
-    )
+def send_cmd(payload):
+    sock.sendto(payload.encode("utf-8"), (ESP32_IP, PORT))
 
-    points = np.array([frame[:3, 3] for frame in frames])
-
-    arm_line.set_data(points[:, 0], points[:, 1])
-    arm_line.set_3d_properties(points[:, 2])
-
-    endpoint = points[-1]
-    arm_endpoint._offsets3d = (
-        [endpoint[0]],
-        [endpoint[1]],
-        [endpoint[2]]
-    )
-
-    if target is not None:
-        x, y, z = target
-
-        target_point._offsets3d = ([x], [y], [z])
-
-        target_guide.set_data([x, x], [y, y])
-        target_guide.set_3d_properties([0.0, z])
-    else:
-        target_point._offsets3d = ([], [], [])
-        target_guide.set_data([], [])
-        target_guide.set_3d_properties([])
-
-    fig.canvas.draw_idle()
-    fig.canvas.flush_events()
-
-
-draw_arm(current_angles)
-plt.show(block=False)
-
-
-# -------------------- SERVO CONTROL --------------------
 
 def servo_command(joint_name, joint_radians):
     config = JOINT_CONFIG[joint_name]
     channel = config["channel"]
-
-    angle = (
-        config["home"]
-        + config["direction"] * math.degrees(joint_radians)
-    )
-
+    offset = config.get("offset", 0.0)
+    angle = config["home"] + config["direction"] * math.degrees(joint_radians) + offset
     low, high = SERVO_COMMAND_LIMITS[channel]
 
     if not low <= angle <= high:
@@ -205,191 +127,217 @@ def servo_command(joint_name, joint_radians):
             f"CH{channel}={angle:.1f} outside safe command range "
             f"({low:.0f} to {high:.0f})."
         )
-
     return angle
 
 
 def get_servo_commands(angles):
     return {
-        config["channel"]: servo_command(
-            name, angles[joint_indices[name]]
-        )
+        config["channel"]: servo_command(name, angles[joint_indices[name]])
         for name, config in JOINT_CONFIG.items()
     }
 
 
-def arm():
-    global _armed
-
-    if not _armed:
-        send_cmd("ARM")
-        _armed = True
+def print_servo_angles(angles):
+    commands = get_servo_commands(angles)
+    angle_str = ", ".join([f"CH{ch}: {ang:.1f}°" for ch, ang in commands.items()])
+    print(f"Servo Angles -> {angle_str}")
 
 
-def disarm():
-    global _armed
+def send_pose(angles):
+    commands = get_servo_commands(angles)
+    for channel, angle in commands.items():
+        send_cmd(f"{channel}:{angle:.2f}")
+    print_servo_angles(angles)
 
-    send_cmd("OFF")
-    _armed = False
+
+pygame.init()
+pygame.joystick.init()
+
+if pygame.joystick.get_count() == 0:
+    print("No controller detected.")
+    sock.close()
+    pygame.quit()
+    raise SystemExit
+
+controller = pygame.joystick.Joystick(0)
+controller.init()
+
+print("Controls:")
+print("  Hold button 10 = continuously follow joystick XYZ")
+print("  Button 2       = ARM / reset software pose")
+print("  Button 1       = OFF")
+
+plt.ion()
+fig = plt.figure()
+ax = fig.add_subplot(111, projection="3d")
+ax.set_xlim(-0.30, 0.30)
+ax.set_ylim(-0.30, 0.30)
+ax.set_zlim(-0.15, 0.35)
+ax.set_xlabel("X (m)")
+ax.set_ylabel("Y (m)")
+ax.set_zlabel("Z (m)")
+ax.set_title("Continuous IK — blue = arm, red = target")
+
+arm_line, = ax.plot([], [], [], "-o", linewidth=5, markersize=6)
+end_point = ax.scatter([], [], [], c="blue", s=70)
+target_point = ax.scatter([], [], [], c="red", s=90)
+target_line, = ax.plot([], [], [], "r--", alpha=0.5)
+plt.show(block=False)
 
 
-# -------------------- MOVEMENT --------------------
+def draw_arm(angles, target=None):
+    frames = arm_chain.forward_kinematics(angles, full_kinematics=True)
+    points = np.array([frame[:3, 3] for frame in frames])
 
-async def move_to_target(target_xyz, traking=False):
+    arm_line.set_data(points[:, 0], points[:, 1])
+    arm_line.set_3d_properties(points[:, 2])
+
+    end = points[-1]
+    end_point._offsets3d = ([end[0]], [end[1]], [end[2]])
+
+    if target is not None:
+        target_point._offsets3d = ([target[0]], [target[1]], [target[2]])
+        target_line.set_data([target[0], target[0]], [target[1], target[1]])
+        target_line.set_3d_properties([0.0, target[2]])
+    else:
+        target_point._offsets3d = ([], [], [])
+        target_line.set_data([], [])
+        target_line.set_3d_properties([])
+
+    fig.canvas.draw_idle()
+    fig.canvas.flush_events()
+    plt.pause(0.001)
+
+
+def deadzone(value):
+    return 0.0 if abs(value) < CONTROLLER_DEADZONE else value
+
+
+def read_target():
+    x_raw = deadzone(controller.get_axis(0))
+    y_raw = deadzone(-controller.get_axis(1))
+    z_axis = deadzone(controller.get_axis(3))
+
+    target_x = x_raw * TARGET_XY_RANGE
+    target_y = y_raw * TARGET_XY_RANGE
+
+    if z_axis >= 0.0:
+        target_z = -z_axis * TARGET_Z_DOWN_LIMIT
+    else:
+        target_z = -z_axis * TARGET_Z_UP_LIMIT
+
+    return np.array([target_x, target_y, target_z], dtype=float)
+
+
+def follow_target(target_xyz):
     global current_angles
 
-    target = np.asarray(target_xyz, dtype=float)
+    target_xyz = np.asarray(target_xyz, dtype=float)
+    if target_xyz.shape != (3,) or not np.all(np.isfinite(target_xyz)):
+        return
 
-    if target.shape != (3,) or not np.all(np.isfinite(target)):
-        return []
+    seed = current_angles.copy()
+    current_xyz = arm_chain.forward_kinematics(seed)[:3, 3]
+    difference = target_xyz - current_xyz
+    distance = float(np.linalg.norm(difference))
 
-    async with _move_lock:
-        seed = current_angles.copy()
-        current_xyz = arm_chain.forward_kinematics(seed)[:3, 3]
+    if distance < 0.001:
+        return
 
-        difference = target - current_xyz
-        distance = float(np.linalg.norm(difference))
+    direction = difference / distance
+    steps = min(
+        STEPS_PER_UPDATE,
+        max(1, int(math.ceil(distance / CARTESIAN_STEP_SIZE))),
+    )
 
-        draw_arm(current_angles, target)
+    moved = False
 
-        if distance < 0.001:
-            return [("Target", tuple(target))]
+    for step in range(1, steps + 1):
+        travel = min(step * CARTESIAN_STEP_SIZE, distance)
+        waypoint = current_xyz + direction * travel
 
-        direction = difference / distance
+        try:
+            candidate = arm_chain.inverse_kinematics(
+                target_position=waypoint,
+                initial_position=seed,
+                max_iter=IK_MAX_ITER,
+            )
+            candidate = np.asarray(candidate, dtype=float)
 
-        total_steps = max(
-            1, int(math.ceil(distance / CARTESIAN_STEP_SIZE))
-        )
-
-        if traking:
-            total_steps = min(STEPS_PER_UPDATE, total_steps)
-
-        moved = False
-
-        for step in range(1, total_steps + 1):
-            travel = min(step * CARTESIAN_STEP_SIZE, distance)
-            waypoint = current_xyz + direction * travel
-
-            try:
-                candidate = arm_chain.inverse_kinematics(
-                    target_position=waypoint,
-                    initial_position=seed,
-                    max_iter=IK_MAX_ITER,
-                )
-
-                candidate = np.asarray(candidate, dtype=float)
-
-                if not np.all(np.isfinite(candidate)):
-                    break
-
-                reached = arm_chain.forward_kinematics(candidate)[:3, 3]
-                error = float(np.linalg.norm(reached - waypoint))
-
-                if error > IK_TOLERANCE:
-                    break
-
-                commands = get_servo_commands(candidate)
-
-            except (ValueError, RuntimeError, np.linalg.LinAlgError):
+            if not np.all(np.isfinite(candidate)):
                 break
 
-            arm()
+            reached = arm_chain.forward_kinematics(candidate)[:3, 3]
+            error = float(np.linalg.norm(reached - waypoint))
 
-            for channel, angle in commands.items():
-                send_cmd(f"{channel}:{angle:.2f}")
+            if error > IK_TOLERANCE:
+                break
 
-            current_angles = candidate.copy()
-            seed = candidate.copy()
-            moved = True
+            commands = get_servo_commands(candidate)
 
-            draw_arm(current_angles, target)
+        except (ValueError, RuntimeError, np.linalg.LinAlgError):
+            break
 
-            await asyncio.sleep(LOOP_DELAY)
-
-        final_xyz = arm_chain.forward_kinematics(current_angles)[:3, 3]
-        remaining = float(np.linalg.norm(target - final_xyz))
-
-        if not moved and remaining > IK_TOLERANCE:
-            return []
-
-        if not traking and remaining > IK_TOLERANCE:
-            print(
-                f"Target not fully reached. Remaining distance: "
-                f"{remaining:.4f} m"
-            )
-            return []
-
-        return [("Target", tuple(target))]
-
-
-# -------------------- PROCEDURES --------------------
-
-async def run_procedure(steps):
-    history = []
-
-    for step in steps:
-        if not step:
-            continue
-
-        if step[0] in ("IK", "Target"):
-            if len(step) < 4:
-                raise ValueError(
-                    "IK/Target steps must contain X, Y and Z."
-                )
-
-            history.extend(
-                await move_to_target(step[1:4], traking=False)
-            )
-
-        elif len(step) == 2:
-            channel, angle = step
-
-            if channel not in SERVO_COMMAND_LIMITS:
-                raise ValueError(f"Unsupported servo channel: {channel}")
-
-            low, high = SERVO_COMMAND_LIMITS[channel]
-            angle = float(angle)
-
-            if not low <= angle <= high:
-                raise ValueError(
-                    f"CH{channel} angle must be between {low} and {high}."
-                )
-
-            arm()
+        for channel, angle in commands.items():
             send_cmd(f"{channel}:{angle:.2f}")
 
-            current_angles[joint_indices[
-                next(name for name, config in JOINT_CONFIG.items()
-                     if config["channel"] == channel)
-            ]] = math.radians(
-                (angle - JOINT_CONFIG[
-                    next(name for name, config in JOINT_CONFIG.items()
-                         if config["channel"] == channel)
-                ]["home"])
-                / JOINT_CONFIG[
-                    next(name for name, config in JOINT_CONFIG.items()
-                         if config["channel"] == channel)
-                ]["direction"]
-            )
+        current_angles = candidate.copy()
+        seed = candidate.copy()
+        moved = True
 
-            draw_arm(current_angles)
-            history.append(("Servo", (channel, angle)))
-
-        elif len(step) == 1:
-            delay = float(step[0])
-
-            if delay < 0:
-                raise ValueError("Pause duration cannot be negative.")
-
-            await asyncio.sleep(delay)
-
-        else:
-            raise ValueError(f"Unknown procedure step: {step}")
-
-    return history
+    if moved:
+        print_servo_angles(current_angles)
 
 
-def close():
-    disarm()
+send_cmd("ARM")
+time.sleep(0.5)
+
+running = True
+last_draw = 0.0
+
+try:
+    while running:
+        pygame.event.pump()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.JOYBUTTONDOWN:
+                if event.button == 2:
+                    send_cmd("ARM")
+                    current_angles = np.zeros(len(arm_chain.links), dtype=float)
+                    print("ARM command sent. Software pose reset.")
+                    print_servo_angles(current_angles)
+
+                elif event.button == 1:
+                    send_cmd("OFF")
+                    print("OFF command sent.")
+
+        if select.select([sys.stdin], [], [], 0.0)[0]:
+            manual_input = sys.stdin.readline().strip()
+            if manual_input:
+                send_cmd(manual_input)
+                print(f"Manual command sent: {manual_input}")
+
+        target = read_target()
+
+        if controller.get_button(FOLLOW_BUTTON):
+            follow_target(target)
+
+        now = time.monotonic()
+        if now - last_draw >= 0.03:
+            draw_arm(current_angles, target)
+            last_draw = now
+
+        time.sleep(LOOP_DELAY)
+
+except KeyboardInterrupt:
+    pass
+
+finally:
+    send_cmd("OFF")
     sock.close()
+    plt.ioff()
     plt.close(fig)
+    pygame.quit()

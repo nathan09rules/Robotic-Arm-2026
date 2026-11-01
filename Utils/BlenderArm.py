@@ -75,6 +75,7 @@ STATE = {
 
 
 async def send_pose(bone_name, x, y, z):
+    pass
     reader, writer = await asyncio.open_connection('127.0.0.1', 9999)
     writer.write(f"{bone_name}:{x},{y},{z}".encode())
     await writer.drain()
@@ -177,7 +178,7 @@ Procedures = {
 last_done = ""
 
 
-Conditions_Robo = [
+Conditions = [
     [
         "grab",
         ["THUMB", 0],
@@ -212,23 +213,44 @@ Conditions_Robo = [
         ["RING", 0],
         ["PINKY", 0],
     ],
+    [
+        "move",
+        ["THUMB", 2],
+        ["INDEX", 2],
+        ["MIDDLE", 2],
+        ["RING", 0],
+        ["PINKY", 0],
+    ],
+
+
 ]
 
 
+
 def finger(finger_name, state):
-    if finger_name not in STATE:
-        return
+    if finger_name in STATE and STATE[finger_name] != state:
+        STATE[finger_name] = state
+        Tranform = Position[finger_name][state]
+        for bone in Tranform:
+            pass
+            #asyncio.run(send_pose(str(bone[0]), bone[1][0], bone[1][1], bone[1][2]))
 
-    if state not in Position.get(finger_name, {}):
-        return
+        pass
+        for state in Conditions:
+            passed = True
+            for bone_num in state[1::]:
+                if STATE[bone_num[0]] != bone_num[1]:
+                    passed = False
 
-    STATE[finger_name] = state
+            if passed == True:
+                pass
+                #process_msg(state[0])
 
 
 def HandState():
     global last_done
 
-    for condition in Conditions_Robo:
+    for condition in Conditions:
         procedure_name = condition[0]
 
         passed = all(

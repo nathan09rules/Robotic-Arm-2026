@@ -13,8 +13,8 @@ from Utils.BlenderArm import finger, HandState
 from Utils.Arm import move_to_target
 
 
-CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
-CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
+CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
+CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
 
 X_LIMIT = (-0.2, 0.2)
 Y_LIMIT = (-0.2, 0.2)
@@ -91,15 +91,15 @@ ax.set_zlabel("Height Z (m)")
 
 
 Bone = [
-    ("THUMB", 3, 5, 0.06, 0, 2),
+    ("THUMB", 3, 5, 0.05, 0, 2),
     ("INDEX", 8, 5, 0.06, 0, 2),
     ("MIDDLE", 12, 9, 0.06, 0, 2),
     ("RING", 16, 13, 0.06, 0, 2),
-    ("PINKY", 20, 17, 0.06, 0, 2)
+    ("PINKY", 20, 17, 0.05, 0, 2)
 ]
 
 SPEACIAL_STATES = [
-    ("INDEX-THUMB", 4, 8, 0.02, 0, -1)
+    ("INDEX-THUMB", 4, 8, 0.04, 0, -1)
 ]
 
 Conditions_Code = [
@@ -120,6 +120,11 @@ async def check_hand():
     )
 
     return passed
+
+async def special_states(state):
+    if state == "INDEX-THUMB":
+        print(Position[0])
+        await move_to_target(Position[0], traking=False)
 
 
 timestamp1 = 0
@@ -184,11 +189,12 @@ try:
                 distance = np.linalg.norm(
                     Position[joint] - Position[reference]
                 )
-                finger(
-                    name,
-                    true_state if distance < threshold else false_state
-                )
-
+                if distance < threshold:
+                    finger(
+                        name,
+                        true_state if distance < threshold else false_state
+                    )
+                    asyncio.run(special_states(name))
             asyncio.run(check_hand())
 
         ax.set_xlim(X_LIMIT)
@@ -196,7 +202,8 @@ try:
         ax.set_zlim(Z_LIMIT)
 
         if Position is not None:
-            print(Position[0])
+            pass
+            #print(Position[0])
             #asyncio.run(move_to_target(Position[0], traking=True))
 
 

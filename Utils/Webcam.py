@@ -211,15 +211,4 @@ def Plot_Hand(position_cam, result_cam1, result_cam2, ax, artists):
             line.set_data([], [])
             line.set_3d_properties([])
 
-    centre = (xyz.min(axis=0) + xyz.max(axis=0)) / 2
-    radius = max(np.ptp(xyz, axis=0).max() * 0.6, 0.05)
-
-    ax.set_xlim(centre[0] - radius, centre[0] + radius)
-    ax.set_ylim(centre[1] - radius, centre[1] + radius)
-    ax.set_zlim(centre[2] - radius, centre[2] + radius)
-
-    ax.set_xlabel("Floor X (m)")
-    ax.set_ylabel("Floor Y (m)")
-    ax.set_zlabel("Height Z (m)")
-
     return points
