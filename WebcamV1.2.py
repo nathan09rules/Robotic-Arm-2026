@@ -1,17 +1,19 @@
-import cv2
-import time
-import threading
+#!/usr/bin/env python3
+"""Main robotic arm controller application integrating dual camera MediaPipe tracking.
+"""
 import asyncio
+import threading
+import time
 
-import numpy as np
-import mediapipe as mp
+import cv2
 import matplotlib.pyplot as plt
+import mediapipe as mp
+import numpy as np
 
-from Utils.Webcam import *
+from Utils.Arm import current_angles, draw_arm, move_to_target, step_interpolation
+from Utils.BlenderArm import HandState, finger
 from Utils.Boundry import BoundaryTracker
-from Utils.BlenderArm import finger, HandState
-from Utils.Arm import move_to_target, draw_arm, current_angles, step_interpolation
-
+from Utils.Webcam import *
 
 CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
 CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
@@ -30,7 +32,6 @@ if not cam1.isOpened() or not cam2.isOpened():
     cam2.release()
     raise RuntimeError("Could not open both cameras")
 
-
 BaseOptions = mp.tasks.BaseOptions
 HandLandmarker = mp.tasks.vision.HandLandmarker
 HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
@@ -39,18 +40,17 @@ RunningMode = mp.tasks.vision.RunningMode
 options1 = HandLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
     running_mode=RunningMode.VIDEO,
-    num_hands=2
+    num_hands=2,
 )
 
 options2 = HandLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
     running_mode=RunningMode.VIDEO,
-    num_hands=2
+    num_hands=2,
 )
 
 landmarker_cam1 = HandLandmarker.create_from_options(options1)
 landmarker_cam2 = HandLandmarker.create_from_options(options2)
-
 
 plt.ion()
 
@@ -77,13 +77,12 @@ ax.set_xlabel("Floor X (m)")
 ax.set_ylabel("Floor Y (m)")
 ax.set_zlabel("Height Z (m)")
 
-
 Bone = [
     ("THUMB", 3, 5, 0.05, 0, 2),
     ("INDEX", 8, 5, 0.06, 0, 2),
     ("MIDDLE", 12, 9, 0.06, 0, 2),
     ("RING", 16, 13, 0.06, 0, 2),
-    ("PINKY", 20, 17, 0.05, 0, 2)
+    ("PINKY", 20, 17, 0.05, 0, 2),
 ]
 
 SPEACIAL_STATES = [
@@ -95,19 +94,18 @@ Conditions_Code = [
     ("INDEX", 0),
     ("MIDDLE", 0),
     ("RING", 0),
-    ("PINKY", 0)
+    ("PINKY", 0),
 ]
 
 last_target = None
 Position = None
 
+
 def check_hand():
     STATE = HandState()
-    passed = all(
-        STATE[name] == value
-        for name, value in Conditions_Code
-    )
+    passed = all(STATE[name] == value for name, value in Conditions_Code)
     return passed
+
 
 def special_states(state, pos):
     global last_target
@@ -134,7 +132,6 @@ try:
         timestamp = time.monotonic_ns() // 1_000_000
         timestamp1 = max(timestamp, timestamp1 + 1)
         timestamp2 = max(timestamp, timestamp2 + 1)
-        
 
         result1 = process_and_display(
             frame1, landmarker_cam1, timestamp1, "Camera 1"
@@ -144,14 +141,14 @@ try:
             frame2, landmarker_cam2, timestamp2, "Camera 2"
         )
 
-        if frame_count % 5 == 0:
+        if frame_count % 2 == 0:
             if result1.hand_landmarks and result2.hand_landmarks:
                 Position = Plot_Hand(
                     calibration,
                     result1,
                     result2,
                     ax,
-                    hand_artists
+                    hand_artists,
                 )
             else:
                 Position = None
@@ -185,13 +182,11 @@ try:
                     if distance < threshold:
                         finger(
                             name,
-                            true_state if distance < threshold else false_state
+                            true_state if distance < threshold else false_state,
                         )
-                        special_states(name, Position[0].copy())
+                        special_states(name, Position[0].copy() * 2)
                 check_hand()
 
-                last_target = Position[0].copy()
-                move_to_target(last_target, traking=True)
 
         ax.set_xlim(X_LIMIT)
         ax.set_ylim(Y_LIMIT)

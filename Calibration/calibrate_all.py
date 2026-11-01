@@ -10,7 +10,7 @@ CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
 
 OUTPUT_FILE = "Utils/webcam-calibration.npz"
 
-NUM_VIEWS = 20
+NUM_VIEWS = 30
 CAPTURE_INTERVAL = 2.0
 MIN_CORNERS = 6
 

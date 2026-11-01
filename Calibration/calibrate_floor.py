@@ -6,8 +6,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-CAM1_SOURCE = 2
-CAM2_SOURCE = 4
+CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
+CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
 
 CAMERA_FILE = "Utils/webcam-calibration.npz"
 OUTPUT_FILE = "Utils/floor-calibration.npz"
