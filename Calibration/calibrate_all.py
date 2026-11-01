@@ -5,12 +5,8 @@ import cv2
 import numpy as np
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-CAM1_SOURCE = 2
-CAM2_SOURCE = 4
+CAM1_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.3-usb-0:2:1.0-video-index0"
+CAM2_SOURCE = "/dev/v4l/by-path/pci-0000:04:00.4-usb-0:2:1.0-video-index0"
 
 OUTPUT_FILE = "Utils/webcam-calibration.npz"
 
@@ -19,8 +15,8 @@ CAPTURE_INTERVAL = 2.0
 MIN_CORNERS = 6
 
 BOARD_SIZE = (7, 5)
-SQUARE_LENGTH = 25       # mm
-MARKER_LENGTH = 18       # mm
+SQUARE_LENGTH = 25
+MARKER_LENGTH = 18
 
 DICTIONARY = cv2.aruco.getPredefinedDictionary(
     cv2.aruco.DICT_6X6_250
@@ -37,16 +33,7 @@ detector = cv2.aruco.CharucoDetector(board)
 BOARD_CORNERS = board.getChessboardCorners()
 
 
-# ============================================================
-# DETECT CHARUCO CORNERS
-# ============================================================
-
 def detect_corner_map(frame):
-    """
-    Return {corner_id: (x, y)} for detected ChArUco corners.
-    Returns None if too few corners are detected.
-    """
-
     corners, ids, _, _ = detector.detectBoard(frame)
 
     if ids is None or len(ids) < MIN_CORNERS:
@@ -66,22 +53,16 @@ def detect_corner_map(frame):
     return corner_map
 
 
-# ============================================================
-# CALIBRATION
-# ============================================================
-
 def main():
-    cap1 = cv2.VideoCapture(2)
-    cap2 = cv2.VideoCapture(4)
+    cap1 = cv2.VideoCapture(CAM1_SOURCE)
+    cap2 = cv2.VideoCapture(CAM2_SOURCE)
 
-    # Intrinsic calibration observations, independently for each camera.
     object_points1 = []
     image_points1 = []
 
     object_points2 = []
     image_points2 = []
 
-    # Matched observations for stereo calibration.
     stereo_object_points = []
     stereo_image_points1 = []
     stereo_image_points2 = []
@@ -92,8 +73,6 @@ def main():
     last_capture = -CAPTURE_INTERVAL
 
     try:
-
-
         print("=" * 60)
         print("TWO-CAMERA CHARUCO CALIBRATION")
         print("=" * 60)
@@ -142,7 +121,6 @@ def main():
                     "Camera 2 resolution changed during calibration."
                 )
 
-            # Display previews.
             preview1 = frame1.copy()
             preview2 = frame2.copy()
 
@@ -222,15 +200,12 @@ def main():
 
             last_capture = now
 
-            # Both cameras must detect the board.
             if detected1 is None or detected2 is None:
                 print(
                     "Waiting: board must be visible in both cameras."
                 )
                 continue
 
-            # Match IDs so image points correspond to the same
-            # physical ChArUco corners in both cameras.
             common_ids = sorted(
                 set(detected1.keys()) & set(detected2.keys())
             )
@@ -241,8 +216,6 @@ def main():
                     f"{len(common_ids)} shared corners detected."
                 )
                 continue
-
-            # ----- Camera 1 intrinsic observations -----
 
             ids1 = sorted(detected1.keys())
 
@@ -260,8 +233,6 @@ def main():
                 img1.reshape(-1, 1, 2)
             )
 
-            # ----- Camera 2 intrinsic observations -----
-
             ids2 = sorted(detected2.keys())
 
             obj2 = BOARD_CORNERS[ids2].astype(np.float32)
@@ -277,8 +248,6 @@ def main():
             image_points2.append(
                 img2.reshape(-1, 1, 2)
             )
-
-            # ----- Matched stereo observations -----
 
             obj_stereo = BOARD_CORNERS[common_ids].astype(
                 np.float32
@@ -316,10 +285,6 @@ def main():
         print("All 20 successful views collected.")
         print("Calculating camera intrinsics...")
 
-        # ----------------------------------------------------
-        # CALIBRATE CAMERA 1
-        # ----------------------------------------------------
-
         error1, K1, dist1, _, _ = cv2.calibrateCamera(
             object_points1,
             image_points1,
@@ -327,10 +292,6 @@ def main():
             None,
             None
         )
-
-        # ----------------------------------------------------
-        # CALIBRATE CAMERA 2
-        # ----------------------------------------------------
 
         error2, K2, dist2, _, _ = cv2.calibrateCamera(
             object_points2,
@@ -341,15 +302,6 @@ def main():
         )
 
         print("Calculating relative stereo geometry...")
-
-        # ----------------------------------------------------
-        # STEREO CALIBRATION
-        #
-        # X_cam2 = R @ X_cam1 + T
-        #
-        # Translation T will use millimetres because the board
-        # dimensions were supplied in millimetres.
-        # ----------------------------------------------------
 
         criteria = (
             cv2.TERM_CRITERIA_EPS
@@ -373,10 +325,6 @@ def main():
             )
         )
 
-        # ----------------------------------------------------
-        # SAVE ALL CALIBRATION DATA TO ONE FILE
-        # ----------------------------------------------------
-
         output_path = Path(OUTPUT_FILE)
         output_path.parent.mkdir(
             parents=True,
@@ -385,32 +333,18 @@ def main():
 
         np.savez(
             str(output_path),
-
-            # Camera 1 intrinsics.
             K1=K1,
             dist1=dist1,
-
-            # Camera 2 intrinsics.
             K2=K2,
             dist2=dist2,
-
-            # Compatibility with the original single-camera file.
             camera_matrix=K1,
             distortion=dist1,
-
-            # Camera 1 -> Camera 2 transformation.
             R=R,
             T=T,
-
-            # Additional stereo calibration matrices.
             E=E,
             F=F,
-
-            # Resolution of each calibrated camera.
             image_size1=np.array(image_size1, dtype=np.int32),
             image_size2=np.array(image_size2, dtype=np.int32),
-
-            # Calibration errors for inspection.
             intrinsic_error1=np.array(error1),
             intrinsic_error2=np.array(error2),
             stereo_error=np.array(stereo_error)
@@ -423,7 +357,7 @@ def main():
         print(f"Saved file: {output_path}")
         print(f"Camera 1 reprojection error: {error1:.5f}")
         print(f"Camera 2 reprojection error: {error2:.5f}")
-        print(f"Stereo calibration error:   {stereo_error:.5f}")
+        print(f"Stereo calibration error:    {stereo_error:.5f}")
         print()
         print("Camera 1 intrinsic matrix:")
         print(K1)
