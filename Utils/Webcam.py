@@ -67,7 +67,7 @@ def process_and_display(frame, landmarker, timestamp_ms, window_name):
             for p in pts:
                 cv2.circle(frame, p, 4, (0, 0, 255), -1)
 
-    cv2.imshow(window_name, frame)
+    #cv2.imshow(window_name, frame)
     cv2.waitKey(1)
 
     return result

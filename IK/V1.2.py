@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""Robotic arm IK controller (single file).  Rebuild of V1.2.
-
-Three separate stages:
-  1. URDF model     UrdfChain      FK straight from Robot.urdf: T = T_origin * Rot(axis, q)
-  2. Bounded solver solve_ik       scipy least_squares with hard lower/upper bounds
-  3. Servo mapping  urdf_to_servo  hardware calibration only
-
-Run:      python3 arm_controller.py            (gamepad + ESP32 + 3D plot)
-Selftest: python3 arm_controller.py --selftest (no hardware, no pygame needed)
-
-Needs Robot.urdf next to this file (or pass --urdf PATH).
-"""
 import math
 import os
 import socket
@@ -21,27 +9,25 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.optimize import least_squares
 
-# ------------------------------------------------------------------ settings
 ESP32_IP = "192.168.4.1"
 PORT = 8888
 HERE = os.path.dirname(os.path.abspath(__file__))
 URDF = os.path.join(HERE, "Robot.urdf")
 
-MOVE_SPEED = 0.08            # m/s at full stick (V1.2 value)
+MOVE_SPEED = 0.08
 DEADZONE = 0.1
-IK_TOLERANCE = 0.015        # "exact" if within 1.5 cm (V1.2 value)
-PLOT_EVERY = 4              # unreachable targets always use the closest in-bounds pose
+IK_TOLERANCE = 0.015
+PLOT_EVERY = 4
 
 STARTUP = {0: 70, 1: 90, 4: 90, 13: 90, 14: 90, 15: 150}
 SEND_ORDER = (14, 13, 15, 4)
 ACTIVE = ["joint_14", "joint_13", "joint_15", "joint_4"]
-SERVO_LIMITS = {14: (0, 180), 13: (90, 150), 15: (90, 150), 4: (0, 90)}
+SERVO_LIMITS = {14: (0, 180), 13: (60, 120), 15: (90, 150), 4: (0, 90)}
 
 
-# ------------------------------------------------------------------ stage 1: URDF
 def _rpy(r, p, y):
     cr, sr, cp, sp, cy, sy = (math.cos(r), math.sin(r), math.cos(p), math.sin(p),
-                              math.cos(y), math.sin(y))
+                             math.cos(y), math.sin(y))
     return np.array([[cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr],
                      [sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr],
                      [-sp,   cp*sr,            cp*cr]])
@@ -72,12 +58,12 @@ class UrdfChain:
                 lo=float(lim.get("lower")) if lim is not None and lim.get("lower") else None,
                 hi=float(lim.get("upper")) if lim is not None and lim.get("upper") else None)
         chain, link = [], tip
-        while link != root:                       # walk tip -> root, then reverse
+        while link != root:
             chain.append(joints[link])
             link = joints[link]["parent"]
         self.chain = chain[::-1]
         self.names = [j["name"] for j in self.chain]
-        idx = [self.names.index(n) for n in ACTIVE]          # raises if a joint is missing
+        idx = [self.names.index(n) for n in ACTIVE]
         self.lower = np.array([self.chain[i]["lo"] for i in idx])
         self.upper = np.array([self.chain[i]["hi"] for i in idx])
         self.fixed = [j["name"] for j in self.chain if j["type"] == "fixed"]
@@ -97,13 +83,12 @@ class UrdfChain:
     def fk(self, q):
         return self.frames(q)[-1][:3, 3]
 
-    def points(self, q):                           # base + every joint origin, for plotting
+    def points(self, q):
         return np.array([np.zeros(3)] + [f[:3, 3] for f in self.frames(q)])
 
 
-# ------------------------------------------------------------------ stage 3: servo mapping
 def urdf_to_servo(q):
-    d = [math.degrees(v) for v in q]               # CH13 and CH15: 60 servo-deg per 90 URDF-deg
+    d = [math.degrees(v) for v in q]
     return {14: 90 + d[0], 13: 90 + d[1] / 1.5, 15: 90 + d[2] / 1.5, 4: 90 - d[3]}
 
 
@@ -115,19 +100,12 @@ def servo_ok(s, eps=1e-6):
     return all(lo - eps <= s[c] <= hi + eps for c, (lo, hi) in SERVO_LIMITS.items())
 
 
-# ------------------------------------------------------------------ stage 2: bounded solver
 class Solution:
     def __init__(self, q, err, exact, in_bounds):
         self.q, self.err, self.exact, self.in_bounds = q, err, exact, in_bounds
 
 
 def solve_ik(chain, target, q_prev, tol=IK_TOLERANCE, reg=1e-3, max_nfev=60):
-    """min ||FK(q)-target||^2 + reg*||q-q_prev||^2 subject to lower <= q <= upper.
-
-    Bounds are handed to least_squares (trf), which keeps every iterate inside
-    them, so the result is in-bounds by construction. Nothing is clamped after.
-    Unreachable target -> closest in-bounds configuration, exact=False.
-    """
     lo, hi = chain.lower, chain.upper
     target = np.asarray(target, float)
     q_prev = np.clip(q_prev, lo, hi)
@@ -144,18 +122,15 @@ def solve_ik(chain, target, q_prev, tol=IK_TOLERANCE, reg=1e-3, max_nfev=60):
                           max_nfev=max_nfev, xtol=1e-10, ftol=1e-10)
         results.append((r.x, float(np.linalg.norm(chain.fk(r.x) - target))))
         if k == 0 and results[0][1] < tol:
-            break                                   # continuity seed already reaches target
+            break
     best = min(e for _, e in results)
     q, err = min(((x, e) for x, e in results if e <= best + 5e-4),
-                 key=lambda t: np.linalg.norm(t[0] - q_prev))   # prefer least joint motion
+                 key=lambda t: np.linalg.norm(t[0] - q_prev))
     ok = bool(np.all(np.isfinite(q)) and np.all(q >= lo) and np.all(q <= hi))
     return Solution(q, err, exact=(ok and err <= tol), in_bounds=ok)
 
 
-# ------------------------------------------------------------------ control logic
 class ArmState:
-    """Hardware-free: holds last valid joints + target, validates every step."""
-
     def __init__(self, chain):
         self.chain = chain
         self.reset()
@@ -165,28 +140,24 @@ class ArmState:
         self.target = self.chain.fk(self.q).copy()
 
     def move(self, movement, dt):
-        """Returns (servo_commands | None, status). Pose is kept whenever None."""
         try:
             new_target = self.target + np.asarray(movement) * MOVE_SPEED * dt
             sol = solve_ik(self.chain, new_target, self.q)
             cmds = urdf_to_servo(sol.q)
-            # Safety net only: the bounded solver already guarantees these hold.
             if not (sol.in_bounds and servo_ok(cmds)):
                 return None, "solver result invalid, pose kept"
-            # Always take whatever the solver ended with (exact or closest approximation).
             self.q = sol.q
             self.target = new_target if sol.exact else self.chain.fk(self.q).copy()
             return cmds, "ok" if sol.exact else f"closest (err {sol.err*100:.1f} cm)"
-        except Exception as e:                      # never crash: keep the last pose
+        except Exception as e:
             return None, f"solver error ({e}), pose kept"
 
 
-# ------------------------------------------------------------------ hardware main
 def main(urdf_path):
     import pygame
     import matplotlib.pyplot as plt
 
-    chain = UrdfChain(urdf_path)                    # built once
+    chain = UrdfChain(urdf_path)
     state = ArmState(chain)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -222,7 +193,7 @@ def main(urdf_path):
     plt.show(block=False)
 
     def redraw():
-        p = chain.points(state.q)                   # same FK the solver uses
+        p = chain.points(state.q)
         robot.set_data_3d(p[:, 0], p[:, 1], p[:, 2])
         tgt.set_data_3d([state.target[0]], [state.target[1]], [state.target[2]])
         fig.canvas.draw_idle()
@@ -240,12 +211,12 @@ def main(urdf_path):
                 dt = min(now - prev, 0.05)
                 prev = now
 
-                if pad.get_button(2):                   # HOME
+                if pad.get_button(2):
                     send_startup(); state.reset()
                     print("Returned to startup."); time.sleep(0.3)
-                if pad.get_button(1):                   # OFF
+                if pad.get_button(1):
                     send_cmd("OFF"); print("Arm disabled."); time.sleep(0.3)
-                if pad.get_button(10):                  # MOVE TARGET
+                if pad.get_button(10):
                     mv = np.array([axis(pad.get_axis(0)), axis(-pad.get_axis(1)), axis(-pad.get_axis(3))])
                     if mv.any():
                         cmds, status = state.move(mv, dt)
@@ -262,7 +233,7 @@ def main(urdf_path):
                 time.sleep(0.002)
             except KeyboardInterrupt:
                 raise
-            except Exception as e:                      # never crash the loop
+            except Exception as e:
                 if str(e) != last:
                     print("loop error (continuing):", e); last = str(e)
                 time.sleep(0.02)
@@ -275,7 +246,6 @@ def main(urdf_path):
         plt.close("all")
 
 
-# ------------------------------------------------------------------ selftest (A-E + stress)
 def selftest(urdf_path):
     ch = UrdfChain(urdf_path)
     bad = 0
@@ -283,7 +253,7 @@ def selftest(urdf_path):
     print("   limits deg:", np.degrees(ch.lower).round(2), np.degrees(ch.upper).round(2))
 
     print("B. joint mapping")
-    for c, u, exp in [(14, 0, 90), (14, 90, 180), (13, 0, 90), (13, 90, 150),
+    for c, u, exp in [(14, 0, 90), (14, 90, 180), (13, 0, 90), (13, 45, 120),
                       (15, 0, 90), (15, 90, 150), (4, 0, 90), (4, 90, 0)]:
         q = np.zeros(4); q[ACTIVE.index(f"joint_{c}")] = math.radians(u)
         got = urdf_to_servo(q)[c]

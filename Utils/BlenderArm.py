@@ -150,11 +150,20 @@ Conditions = [
     ],
     [
         "Open",
+        ["THUMB", 0],
         ["INDEX", 2],
         ["MIDDLE", 0],
         ["RING", 0],
         ["PINKY", 0],
     ],
+    [
+        "MV",
+        ["THUMB", 2],
+        ["INDEX", 2],
+        ["MIDDLE", 0],
+        ["RING", 0],
+        ["PINKY", 2],
+    ]
 
 ]
 
