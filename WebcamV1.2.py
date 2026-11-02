@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Main robotic arm controller application integrating dual camera MediaPipe tracking.
-"""
 import asyncio
 import threading
 import time
@@ -86,7 +83,7 @@ Bone = [
 ]
 
 SPEACIAL_STATES = [
-    ("INDEX-THUMB", 4, 8, 0.04, 0, -1)
+    ("INDEX-THUMB", 4, 8, 0.04, 0, -1),
 ]
 
 Conditions_Code = [

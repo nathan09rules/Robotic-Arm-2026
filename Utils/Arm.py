@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""Utils/Arm.py - URDF-driven, joint-limit-safe arm control (drop-in for main.py).
-
-Public API (unchanged): current_angles, draw_arm, move_to_target,
-step_interpolation, arm, send_cmd, run_procedure.
-
-Three separate stages:
-  1. URDF model     UrdfChain      FK straight from Robot.urdf: T = T_origin * Rot(axis, q)
-  2. Bounded solver solve_ik       scipy least_squares, hard lower/upper bounds from the URDF
-  3. Servo mapping  urdf_to_servo  hardware calibration only
-
-Unreachable targets never raise: the solver's closest in-bounds pose is used.
-Robot frame: with all joints at 0 the arm points up (+Z); bending (CH13/15/4)
-swings it towards -Y; CH14 yaws it about Z (+-90 deg).
-"""
 import math
 import os
 import socket
@@ -23,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import least_squares
 
-# ------------------------------------------------------------------ settings
 ESP32_IP = "192.168.4.1"
 PORT = 8888
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,20 +21,19 @@ URDF_CANDIDATES = [
     "/home/nathanpd/Documents/26/Robotic-Arm/IK/Robot.urdf",
 ]
 
-CARTESIAN_STEP_SIZE = 0.03      # m between interpolated waypoints
-MAX_WAYPOINTS = 12              # cap solver work per move_to_target call
-IK_TOLERANCE = 0.015            # "exact" if within 1.5 cm (informational only)
+CARTESIAN_STEP_SIZE = 0.06
+MAX_WAYPOINTS = 12
+IK_TOLERANCE = 0.015
 
 STARTUP = {0: 70, 1: 90, 4: 90, 13: 90, 14: 90, 15: 150}
 SEND_ORDER = (14, 13, 15, 4)
 ACTIVE = ["joint_14", "joint_13", "joint_15", "joint_4"]
-SERVO_LIMITS = {14: (0, 180), 13: (90, 150), 15: (90, 150), 4: (0, 90)}
+SERVO_LIMITS = {14: (0, 180), 13: (60, 120), 15: (90, 150), 4: (0, 90)}
 
 
-# ------------------------------------------------------------------ stage 1: URDF
 def _rpy(r, p, y):
     cr, sr, cp, sp, cy, sy = (math.cos(r), math.sin(r), math.cos(p), math.sin(p),
-                              math.cos(y), math.sin(y))
+                             math.cos(y), math.sin(y))
     return np.array([[cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr],
                      [sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr],
                      [-sp,   cp*sr,            cp*cr]])
@@ -80,12 +64,12 @@ class UrdfChain:
                 lo=float(lim.get("lower")) if lim is not None and lim.get("lower") else None,
                 hi=float(lim.get("upper")) if lim is not None and lim.get("upper") else None)
         chain, link = [], tip
-        while link != root:                       # walk tip -> root, then reverse
+        while link != root:
             chain.append(joints[link])
             link = joints[link]["parent"]
         self.chain = chain[::-1]
         self.names = [j["name"] for j in self.chain]
-        idx = [self.names.index(n) for n in ACTIVE]          # raises if a joint is missing
+        idx = [self.names.index(n) for n in ACTIVE]
         self.lower = np.array([self.chain[i]["lo"] for i in idx])
         self.upper = np.array([self.chain[i]["hi"] for i in idx])
 
@@ -104,13 +88,12 @@ class UrdfChain:
     def fk(self, q):
         return self.frames(q)[-1][:3, 3]
 
-    def points(self, q):                           # base + every joint origin
+    def points(self, q):
         return np.array([np.zeros(3)] + [f[:3, 3] for f in self.frames(q)])
 
 
-# ------------------------------------------------------------------ stage 3: servo mapping
 def urdf_to_servo(q):
-    d = [math.degrees(v) for v in q]               # CH13/CH15: 60 servo-deg per 90 URDF-deg
+    d = [math.degrees(v) for v in q]
     return {14: 90 + d[0], 13: 90 + d[1] / 1.5, 15: 90 + d[2] / 1.5, 4: 90 - d[3]}
 
 
@@ -122,19 +105,12 @@ def servo_ok(s, eps=1e-6):
     return all(lo - eps <= s[c] <= hi + eps for c, (lo, hi) in SERVO_LIMITS.items())
 
 
-# ------------------------------------------------------------------ stage 2: bounded solver
 class Solution:
     def __init__(self, q, err, exact, in_bounds):
         self.q, self.err, self.exact, self.in_bounds = q, err, exact, in_bounds
 
 
 def solve_ik(chain, target, q_prev, tol=IK_TOLERANCE, reg=1e-3, max_nfev=60, n_seeds=5):
-    """min ||FK(q)-target||^2 + reg*||q-q_prev||^2   subject to  lower <= q <= upper.
-
-    Bounds go straight into least_squares (trf), which keeps every iterate inside
-    them: the result is in-bounds by construction, nothing is clamped afterwards.
-    Unreachable target -> closest in-bounds configuration (exact=False).
-    """
     lo, hi = chain.lower, chain.upper
     target = np.asarray(target, float)
     q_prev = np.clip(q_prev, lo, hi)
@@ -142,7 +118,6 @@ def solve_ik(chain, target, q_prev, tol=IK_TOLERANCE, reg=1e-3, max_nfev=60, n_s
     def resid(q):
         return np.concatenate([chain.fk(q) - target, reg * (q - q_prev)])
 
-    # yaw 0 points the arm along -Y, so direction (x, y) needs yaw = atan2(x, -y)
     yaw = math.atan2(target[0], -target[1]) if abs(target[0]) + abs(target[1]) > 1e-9 else 0.0
     seeds = [q_prev, np.array([yaw, 0.5, 1.0, 0.5]), 0.5 * (lo + hi),
              lo + 0.1 * (hi - lo), hi - 0.1 * (hi - lo)][:max(1, n_seeds)]
@@ -152,42 +127,41 @@ def solve_ik(chain, target, q_prev, tol=IK_TOLERANCE, reg=1e-3, max_nfev=60, n_s
                           max_nfev=max_nfev, xtol=1e-10, ftol=1e-10)
         results.append((r.x, float(np.linalg.norm(chain.fk(r.x) - target))))
         if k == 0 and results[0][1] < 1e-3:
-            break                                   # continuity seed already on target
+            break
     best = min(e for _, e in results)
     q, err = min(((x, e) for x, e in results if e <= best + 5e-4),
-                 key=lambda t: np.linalg.norm(t[0] - q_prev))   # prefer least joint motion
+                 key=lambda t: np.linalg.norm(t[0] - q_prev))
     ok = bool(np.all(np.isfinite(q)) and np.all(q >= lo) and np.all(q <= hi))
     return Solution(q, err, exact=(ok and err <= tol), in_bounds=ok)
 
 
-# ------------------------------------------------------------------ state
 def _find_urdf():
     for p in URDF_CANDIDATES:
         if os.path.isfile(p):
             return os.path.abspath(p)
-    raise FileNotFoundError("Could not find Robot.urdf. Tried:\n  " + "\n  ".join(URDF_CANDIDATES))
+    raise FileNotFoundError("Could not find Robot.urdf.")
 
 
-chain = UrdfChain(_find_urdf())                       # built once
+chain = UrdfChain(_find_urdf())
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 _armed = False
 _last_target = None
-_target_queue = []                                    # [(q, servo_commands), ...]
+_target_queue = []
+_hand_origin = None
+_arm_origin = None
+_last_call_time = 0.0
 
-# Joint angles (rad) in ACTIVE order: joint_14, joint_13, joint_15, joint_4.
-# Mutated in place so `from Utils.Arm import current_angles` stays valid.
 current_angles = servo_to_urdf(STARTUP).astype(float)
 
 
 def send_cmd(payload):
     try:
         sock.sendto(payload.encode("utf-8"), (ESP32_IP, PORT))
-    except OSError as e:                              # network down: never crash
+    except OSError as e:
         print("UDP send failed:", e)
 
 
 def arm():
-    """Send ARM and the startup pose once (the model assumes the arm starts there)."""
     global _armed
     if not _armed:
         send_cmd("ARM")
@@ -198,7 +172,6 @@ def arm():
         time.sleep(0.5)
 
 
-# ------------------------------------------------------------------ plot
 fig = plt.figure(num="Robotic Arm 3D")
 ax = fig.add_subplot(111, projection="3d")
 ax.set_xlim(-0.4, 0.4); ax.set_ylim(-0.4, 0.4); ax.set_zlim(0, 0.45)
@@ -210,7 +183,6 @@ target_line, = ax.plot([], [], [], "--", color="red", alpha=0.5)
 
 
 def draw_arm():
-    """Plot the robot from the same URDF forward kinematics the solver uses."""
     try:
         pts = chain.points(current_angles)
         arm_line.set_data(pts[:, 0], pts[:, 1])
@@ -223,21 +195,26 @@ def draw_arm():
             target_line.set_3d_properties([0.0, t[2]])
         fig.canvas.draw_idle()
         fig.canvas.flush_events()
-    except Exception as e:                            # plotting must never stop the arm
+    except Exception as e:
         print("draw_arm error:", e)
 
 
-# ------------------------------------------------------------------ motion
 def move_to_target(target_xyz, traking=True):
-    """Plan a straight Cartesian path to target_xyz as a queue of joint poses.
-
-    Every waypoint uses the bounded solver's result (exact or closest).
-    """
-    global _last_target
+    global _last_target, _hand_origin, _arm_origin, _last_call_time
     try:
-        target = np.asarray(target_xyz, dtype=float)
-        if target.shape != (3,) or not np.all(np.isfinite(target)):
+        curr_hand = np.asarray(target_xyz, dtype=float)
+        if curr_hand.shape != (3,) or not np.all(np.isfinite(curr_hand)):
             return []
+
+        now = time.monotonic()
+
+        if _hand_origin is None or (now - _last_call_time) > 0.3:
+            _hand_origin = curr_hand.copy()
+            _arm_origin = chain.fk(current_angles).copy()
+
+        _last_call_time = now
+
+        target = _arm_origin + (curr_hand - _hand_origin)
         _last_target = target
 
         q = current_angles.copy()
@@ -250,25 +227,24 @@ def move_to_target(target_xyz, traking=True):
         n = min(MAX_WAYPOINTS, max(1, int(math.ceil(distance / CARTESIAN_STEP_SIZE))))
         queue = []
         for i in range(1, n + 1):
-            last = (i == n)   # intermediate waypoints: warm-start only (fast); final one: multi-start
+            last = (i == n)
             sol = solve_ik(chain, start + diff * (i / n), q,
                            n_seeds=4 if last else 1, max_nfev=60 if last else 25)
             cmds = urdf_to_servo(sol.q)
-            if not (sol.in_bounds and servo_ok(cmds)):   # cannot happen with bounded solve
+            if not (sol.in_bounds and servo_ok(cmds)):
                 break
             queue.append((sol.q.copy(), cmds))
             q = sol.q
         if queue:
             _target_queue.clear()
             _target_queue.extend(queue)
-    except Exception as e:                            # never crash: keep current plan
+    except Exception as e:
         print("move_to_target error:", e)
-    return [("Target", tuple(np.asarray(target_xyz, dtype=float).tolist()))] \
-        if np.ndim(target_xyz) == 1 and len(target_xyz) == 3 else []
+    return [("Target", tuple(_last_target.tolist()))] \
+        if _last_target is not None else []
 
 
 def step_interpolation():
-    """Send the next queued pose (call once per main-loop tick)."""
     if not _target_queue:
         return
     try:

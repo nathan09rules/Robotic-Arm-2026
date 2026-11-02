@@ -14,7 +14,7 @@ PORT = 8888
 HERE = os.path.dirname(os.path.abspath(__file__))
 URDF = os.path.join(HERE, "Robot.urdf")
 
-MOVE_SPEED = 0.08
+MOVE_SPEED = 0.1
 DEADZONE = 0.1
 IK_TOLERANCE = 0.015
 PLOT_EVERY = 4
@@ -27,7 +27,7 @@ SERVO_LIMITS = {14: (0, 180), 13: (60, 120), 15: (90, 150), 4: (0, 90)}
 
 def _rpy(r, p, y):
     cr, sr, cp, sp, cy, sy = (math.cos(r), math.sin(r), math.cos(p), math.sin(p),
-                             math.cos(y), math.sin(y))
+                            math.cos(y), math.sin(y))
     return np.array([[cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr],
                      [sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr],
                      [-sp,   cp*sr,            cp*cr]])
@@ -200,7 +200,11 @@ def main(urdf_path):
         fig.canvas.flush_events()
 
     send_startup()
-    print("Arm started.\nButton 10: Move target\nButton 2: Return to startup\nButton 1: Turn off")
+    print("Arm started.\nButton 10: Move target\nButton 2: Save pose (servos 4, 13, 14, 15)\nButton 3: Print procedure\nButton 1: Turn off")
+
+    recorded_procedure = []
+    btn2_prev = False
+    btn3_prev = False
 
     prev, tick, last = time.monotonic(), 0, ""
     try:
@@ -211,9 +215,22 @@ def main(urdf_path):
                 dt = min(now - prev, 0.05)
                 prev = now
 
-                if pad.get_button(2):
-                    send_startup(); state.reset()
-                    print("Returned to startup."); time.sleep(0.3)
+                b2 = pad.get_button(2)
+                if b2 and not btn2_prev:
+                    current_servos = urdf_to_servo(state.q)
+                    pose = {ch: round(current_servos[ch], 2) for ch in [4, 13, 14, 15]}
+                    recorded_procedure.append(pose)
+                    print(f"Pose saved: {pose}")
+                btn2_prev = b2
+
+                b3 = pad.get_button(3)
+                if b3 and not btn3_prev:
+                    print("\n--- Recorded Procedure ---")
+                    for pose in recorded_procedure:
+                        print(pose, ",")
+                    print("--------------------------\n")
+                btn3_prev = b3
+
                 if pad.get_button(1):
                     send_cmd("OFF"); print("Arm disabled."); time.sleep(0.3)
                 if pad.get_button(10):

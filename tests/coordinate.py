@@ -51,5 +51,5 @@ if __name__ == "__main__":
             send_cmd(user_msg)
             
         except KeyboardInterrupt:
-            send_cmd("OFF")
+            sen#d_cmd("OFF")
             break
